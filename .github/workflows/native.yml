@@ -1,0 +1,53 @@
+name: Native
+
+on:
+  push:
+    paths:
+      - ".github/workflows/native.yml"
+      - "Makefile"
+      - "assets/**"
+      - "include/**"
+      - "meson.build"
+      - "meson_options.txt"
+      - "nix/**"
+      - "scripts/**"
+      - "src/**"
+      - "tests/**"
+      - "vendor/**"
+  pull_request:
+    paths:
+      - ".github/workflows/native.yml"
+      - "Makefile"
+      - "assets/**"
+      - "include/**"
+      - "meson.build"
+      - "meson_options.txt"
+      - "nix/**"
+      - "scripts/**"
+      - "src/**"
+      - "tests/**"
+      - "vendor/**"
+
+jobs:
+  native-build:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v21
+        with:
+          flakehub: false
+
+      - name: Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v13
+
+      - name: Build
+        run: nix develop ./nix --command make build
+
+      - name: Test
+        run: nix develop ./nix --command make test
