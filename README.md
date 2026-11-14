@@ -7,10 +7,6 @@
 [![Cross builds](https://github.com/tomasmark79/MuTheChords/actions/workflows/cross-builds.yml/badge.svg?branch=main)](https://github.com/tomasmark79/MuTheChords/actions/workflows/cross-builds.yml)
 [![Documentation](https://github.com/tomasmark79/MuTheChords/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/tomasmark79/MuTheChords/actions/workflows/docs.yml)
 
-<p align="center">
-  <img src="assets/MuTheChordsLogo.svg" alt="MuTheChords logo" width="35%">
-</p>
-
 ## Music Theory Chords — C++20 Library, CLI & VST3/CLAP Audio Plugin
 
 **MuTheChords** (*Music Theory Chords*) is a multiplatform MIDI chord generator, music-theory engine, and rhythmic performance processor. Built on the [NixonCpp](README_NixonCpp.md) architecture with **Meson**, **CMake/JUCE**, and reproducible **Nix** environments, it provides:
