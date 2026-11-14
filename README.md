@@ -15,40 +15,61 @@
 
 **MuTheChords** (*Music Theory Chords*) is a multiplatform MIDI chord generator, music-theory engine, and rhythmic performance processor. Built on the [NixonCpp](README_NixonCpp.md) architecture with **Meson**, **CMake/JUCE**, and reproducible **Nix** environments, it provides:
 
-- **`MuTheChordsLib`** — a self-contained, JUCE-free C++20 music-theory and real-time MIDI engine (`namespace muthechords`), cross-compilable for **Linux x86_64**, **Linux ARM64**, **Windows**, and **WebAssembly**.
+- **`MuTheChordsLib`** — a self-contained, JUCE-free C++20 music-theory and real-time MIDI engine (`namespace muthechords`), cross-compilable for **Linux x86_64**, **Linux ARM64**, and **Windows**.
 - **`MuTheChords` Plugin (VST3 & CLAP)** — a sample-accurate MIDI chord and rhythmic performance instrument plugin for Bitwig Studio and modern DAWs on Linux and Windows.
-- **`MuTheChords` CLI / WebAssembly App** — a command-line and browser-ready application powered by `MuTheChordsLib` and `UtilsFactory`.
+- **`MuTheChords` CLI Application** — a command-line inspection and preview utility powered by `MuTheChordsLib` and `UtilsFactory`.
 
 <p align="center">
   <img src="docs/images/MuTheChords-chords.png" alt="MuTheChords VST3/CLAP Plugin UI" width="85%">
 </p>
 
-## Musical Capabilities
+## Online Documentation & Web Preview
 
-### Harmony & Voicing (`Chords` Mode)
-- **44 Musical Scales & 12 Keys**: Covers Major, Dorian, Phrygian, Lydian, Mixolydian, Minor, Locrian, Harmonic & Melodic Minor, Harmonic Major, Pentatonics, Blues, Bebop, Hungarian, Persian, Hirajoshi, Whole Tone, Diminished, Altered, Chromatic, Iwato, and more.
-- **Chord Stacking & 15 Voicings**: Generates Thirds, Triads, 7th, 9th, 11th, and 13th chords by stacking scale degrees. Supports Root position, 1st–6th inversions, spread voicings (*Bass down*, *Top up*, *Open*, *Wide*, *Drop 2*), *Bass octave* doubling, and octave shifts, plus `-36` to `+36` semitone transposition.
-- **Input Range & Mapping**: Configurable `From`/`To` MIDI range (default `C1`–`B2` in Bitwig notation, `MIDI 36`–`59`) or `Full range`. Notes outside the range pass through polyphonically as solo notes.
-  - **Absolute** mapping triggers chords from scale notes.
-  - **Relative** mapping assigns successive scale degrees to white keys (`C` selects the tonic).
-  - **Outside scale** policy: *Ignore*, *Pass note*, *Snap down*, *Snap up*, or *Nearest*.
-- **Sustain Pedal (CC64) & Latch**: Configurable pedal polarity (*Normal* or *Reversed*) with *Off*, *Hold* (retains chord until pedal release), and *Chord Switch* (temporarily selects `Alt Chord` on next trigger). *Latch* holds chords hands-free until re-triggered or stopped.
-- **Context-Aware Chord Naming**: Lock-free `DisplayMailbox` transfers sounding chord state from the audio thread to the UI without allocations. Displays chord symbols (e.g., `Dm7/F`, `Cmaj11(#11)`) and note lists with selectable *Auto*, *Flats* (`♭`), or *Sharps* (`♯`) enharmonic spelling.
-- **Transparent MIDI Routing**: Preserves velocity, MIDI channels (`1`–`16`), 14-bit pitch bend, mod wheel (`CC1`), and aftertouch with live `BEND` and `MOD` input indicators.
+- 📖 **[API Documentation (Doxygen)](https://tomasmark79.github.io/MuTheChords/html/index.html)** — complete C++20 class, namespace, and architecture reference published via GitHub Pages.
+- 🌐 **[Interactive WebAssembly Build](https://tomasmark79.github.io/MuTheChords/)** — run the standalone `MuTheChords` runtime directly in your browser.
 
-### Rhythmic Pattern Engine (`Performance` Mode)
-- **Adaptive Phrase & Rhythm Playback**: Drives external rhythmic/melodic patterns mapped dynamically onto the currently triggered harmony and scale.
-- **Transport & Tempo Sync**: Sample-accurate scheduling synchronized with the DAW playhead (`DAW Sync` on/off), plus immediate held-key playback and hands-free graph audition (`Preview`) when the DAW transport is stopped.
-- **Playback & Transitions**:
-  - **Rate & Division**: `×0.25` to `×2` speed multipliers with *Straight* or *Triplet* feel.
-  - **Voices & Passing Notes**: *Auto*, *All*, or *Pattern* voice allocation; optional diatonic scale passing tones.
-  - **Chord Change & Note Transition**: *Continue*, *Restart*, or *Next beat* harmony changes; *Cut*, *Retain common*, or *Let ring* voice transitions.
-  - **Playback Modes & Bar Looping**: *Held*, *One pass*, or *Continuous* playback with interactive bar-loop handles on the pattern graph.
+---
 
-### Cross-Instance Harmony Sync & External Profiles
-- **Shared Harmony (`Sync`)**: Equal peer-to-peer synchronization of `Key` and `Scale` across multiple plugin instances (even across separate VST3/CLAP host processes) via OS-level file locking.
-- **Profile Import / Export (`.chordprofile`)**: Atomic JSON profile serialization (`MuTheChordsProfile` v2) for saving and sharing complete plugin configurations independently of DAW presets.
-- **Host Automation**: Exposes all 32 automatable parameters to the host (including VST3 parameter-under-mouse identification for Bitwig Remote Controls).
+## Feature Overview
+
+### 1. Harmony & Voicing (`Chords` Mode)
+
+| Feature | Description |
+| --- | --- |
+| **Keys & Scales** | **12 Keys** (`C`–`B`) and **44 Scales** including Major, Dorian, Phrygian, Lydian, Mixolydian, Minor, Locrian, Harmonic/Melodic Minor, Harmonic Major, Pentatonics, Blues, Bebop, Hungarian, Persian, Hirajoshi, Whole Tone, Diminished, Altered, Chromatic, and Iwato. |
+| **Chord Types** | Stacks scale degrees into **Thirds**, **Triads**, **7th**, **9th**, **11th**, and **13th** chords. |
+| **15 Voicing Modes** | **Inversions**: Root, 1st–6th inversion.<br>**Spread**: *Bass down*, *Top up*, *Open*, *Wide*, *Drop 2*.<br>**Octaves**: *Bass octave* (adds root below), *Octave up*, *Octave down*. |
+| **Transposition** | Shifts generated chord output by **-36 to +36 semitones** without affecting solo pass-through notes. |
+| **Chord Naming** | Context-aware chord symbol detection (e.g., `Dm7/F`, `Cmaj11(#11)`) with selectable **Auto**, **Flats (`♭`)**, or **Sharps (`♯`)** enharmonic spelling. |
+
+### 2. Keyboard Range, Mapping & Controllers
+
+| Feature | Description |
+| --- | --- |
+| **Input Range** | Configurable `From`/`To` MIDI range (defaults to `C1`–`B2`, MIDI `36`–`59` in Bitwig octave naming) or **Full range**. Notes outside the range pass through polyphonically (`+ solo`). |
+| **Key Mapping** | **Absolute**: scale notes trigger chords.<br>**Relative**: white keys (`C`–`B`) trigger successive scale degrees (`C` = tonic). |
+| **Outside-Scale Policy** | Choose **Ignore**, **Pass note**, **Snap down**, **Snap up**, or **Nearest** for non-scale input keys. |
+| **Sustain Pedal (CC64)** | Selectable **Normal** (`64–127`) or **Reversed** (`0–63`) polarity.<br>Modes: **Off**, **Hold** (sustains chord until pedal release), or **Chord Switch** (selects `Alt Chord` while pedal is held). |
+| **Latch & Stop** | **Latch** holds the triggered chord after key release (re-triggering the same key toggles it off). **Stop** and **Bypass** cleanly release all active voices. |
+| **MIDI Transparency** | Retains input velocity, MIDI channels (`1`–`16`), 14-bit pitch bend, mod wheel (`CC1`), and aftertouch, with live **BEND** and **MOD** indicators. |
+
+### 3. Rhythmic Pattern Engine (`Performance` Mode)
+
+| Feature | Description |
+| --- | --- |
+| **Pattern Adaptation** | Adapts multi-voice rhythmic and melodic phrases dynamically to the active chord harmony and scale. |
+| **Transport & Tempo Sync** | **DAW Sync** aligns pattern starts to the host beat; when stopped, held keys or clicking the **Pattern Graph** (`Preview`) play immediately at the last known host tempo. |
+| **Timing & Feel** | **Rate** multipliers from `×0.25` to `×2` combined with **Straight** or **Triplet** division. |
+| **Voices & Passing Tones** | **Voices**: *Auto*, *All*, or *Pattern*.<br>**Passing notes**: *Off* (chord tones only) or *Scale* (diatonic passing steps). |
+| **Transitions & Looping** | **Chord change**: *Continue*, *Restart*, or *Next beat*.<br>**Note transition**: *Cut*, *Retain common*, or *Let ring*.<br>**Playback**: *Held*, *One pass*, or *Continuous*, with draggable bar-loop handles on the interactive graph. |
+
+### 4. Multi-Instance Workflow & Host Integration
+
+- **Shared Harmony (`Sync`)**: Peer-to-peer synchronization of `Key` and `Scale` across multiple plugin instances (`All instances equal`), even across separate VST3/CLAP host processes.
+- **External Profiles (`.chordprofile`)**: Atomic JSON Import/Export (`MuTheChordsProfile` v2) for storing complete Harmony, Performance, and per-pattern loop regions independently of DAW projects.
+- **DAW Automation & Remote Controls**: All 32 parameters are automatable and support VST3 parameter-under-mouse identification for Bitwig Studio Remote Controls.
+
+---
 
 ## Quick Start
 
@@ -66,13 +87,17 @@ make build
 # Run the GoogleTest suite (9 test suites covering engine, naming, mailbox, sync, patterns & utils)
 make test
 
+# Run clang-tidy static analysis and clang-format verification
+make check
+make format-check
+
 # Run the CLI application (list scales and preview a chord on MIDI note 62)
 ./build/builddir-release/MuTheChords --scales -n 62
 ```
 
 ### 2. Audio Plugin — VST3 & CLAP (CMake + JUCE)
 
-Building the VST3 and CLAP plugin targets requires `JUCE` and `clap-juce-extensions` under `third_party/` (gitignored):
+Building the VST3 and CLAP plugin targets uses `JUCE` and `clap-juce-extensions` under `third_party/` (gitignored):
 
 ```bash
 # Build Linux VST3 & CLAP plugins and run all 7 plugin/host smoke tests
@@ -83,16 +108,16 @@ make plugin-windows
 ```
 
 Built plugin bundles are placed in `dist/linux/` and `dist/windows/` (`MuTheChords.vst3` and `MuTheChords.clap`).
-Private external pattern libraries (`*.patterns.json`) are intentionally excluded from the public repository via `.gitignore`; when present locally in `dist/<platform>/MuTheChords.patterns.json` (or pointed to by `MUTHECHORDS_PATTERN_LIBRARY`), they are discovered automatically.
+Private external pattern libraries (`*.patterns.json`) are excluded from the repository via `.gitignore`; when present locally in `dist/<platform>/MuTheChords.patterns.json` (or specified via `MUTHECHORDS_PATTERN_LIBRARY`), they are loaded automatically.
 
-### 3. Cross-Compilation (NixonCpp Targets)
+### 3. Cross-Compilation (Linux & Windows)
 
 ```bash
 make cross-aarch64   # Build library & CLI for Linux ARM64
 make cross-windows   # Build library & CLI for Windows (MinGW x86_64)
-make cross-wasm      # Build library & app for WebAssembly (Emscripten)
-make cross-all       # Build all cross-compilation targets
 ```
+
+---
 
 ## Project Structure
 
@@ -101,7 +126,7 @@ make cross-all       # Build all cross-compilation targets
 | [include/MuTheChordsLib/](include/MuTheChordsLib/) | Public C++20 headers (`ChordEngine`, `PerformanceEngine`, `ChordNames`, `Scales`, `Voicing`, `PatternLibrary`, `HarmonySync`, `DisplayMailbox`) |
 | [src/lib/](src/lib/) | `MuTheChordsLib` implementation and NixonCpp `Utils` services (`ILogger`, `IFileReader`, `IJsonSerializer`, `IAssetManager`, `IPlatformInfo`) |
 | [src/plugin/](src/plugin/) | JUCE `MuTheChordsProcessor`, `MuTheChordsEditor`, `ProfileState`, and `Vst3MidiOutputMonitor` |
-| [src/app/](src/app/) | Standalone CLI / WebAssembly entry point ([Application.cpp](src/app/Application.cpp)) |
+| [src/app/](src/app/) | Standalone CLI entry point ([Application.cpp](src/app/Application.cpp)) |
 | [tests/](tests/) | GoogleTest unit tests (`*Test.cpp`) and JUCE/VST3/CLAP integration & smoke tests |
 | [meson.build](meson.build) | Primary Meson build definition for `MuTheChordsLib`, CLI app, and GoogleTest suite |
 | [CMakeLists.txt](CMakeLists.txt) | CMake configuration for VST3 & CLAP plugin targets and plugin CTest suite |
@@ -109,10 +134,11 @@ make cross-all       # Build all cross-compilation targets
 
 ## Architecture
 
-The project follows the **NixonCpp** design: real-time MIDI processing (`ChordEngine`, `PerformanceEngine`, `DisplayMailbox`) is strictly lock-free and allocation-free, while non-realtime services (`PatternLibrary`, `HarmonySync`, CLI context) use `UtilsFactory` abstractions for filesystem, JSON serialization, logging, and platform discovery.
+The project follows the **NixonCpp** design: real-time MIDI processing (`ChordEngine`, `PerformanceEngine`, `DisplayMailbox`) is strictly lock-free and allocation-free on the audio thread, while non-realtime services (`PatternLibrary`, `HarmonySync`, CLI context) use `UtilsFactory` abstractions for filesystem, JSON serialization, logging, and platform discovery.
 
 [![MuTheChords architecture: application, library, utility services, and build targets](docs/architecture.svg)](docs/architecture.svg)
 
+- [API Documentation (Doxygen on GitHub Pages)](https://tomasmark79.github.io/MuTheChords/html/index.html)
 - [Original NixonCpp Template README](README_NixonCpp.md)
 - [Build targets and packaging](docs/build-targets.md)
 - [Debugging](docs/debugging.md)

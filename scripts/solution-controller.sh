@@ -198,9 +198,16 @@ clang_tidy() {
     local line_filter
     line_filter="$(build_line_filter)"
 
-    find "${source_dirs[@]}" \
-        -type f \( -name "*.c" -o -name "*.cpp" \) -print0 \
-        | xargs -0 -n1 clang-tidy -p "$BUILD_DIR" -system-headers=0 \
+    python3 -c 'import json, os, sys
+db = json.load(open(sys.argv[1]))
+seen = set()
+for entry in db:
+    f = os.path.abspath(os.path.join(entry["directory"], entry["file"]))
+    if os.path.isfile(f) and f not in seen:
+        seen.add(f)
+        sys.stdout.write(f + "\0")
+' "$BUILD_DIR/compile_commands.json" \
+        | xargs -0 -r -n1 clang-tidy -p "$BUILD_DIR" -system-headers=0 \
             -header-filter="^${PROJECT_ROOT}/(src|include|tests)/" \
             -line-filter="$line_filter"
     echo -e "${GREEN}✓ clang-tidy checks passed${NC}"
