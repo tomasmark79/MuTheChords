@@ -65,9 +65,11 @@ public:
   juce::Font getPopupMenuFont() override { return juce::FontOptions(13.0f); }
   void positionComboBoxText(juce::ComboBox &box, juce::Label &label) override {
     // Leave a dedicated arrow gutter; Label draws ellipses within the text
-    // area.
-    label.setBounds(8, 1, juce::jmax(0, box.getWidth() - 36), box.getHeight() - 2);
+    // area without horizontally squishing glyphs.
+    label.setBounds(8, 1, juce::jmax(0, box.getWidth() - 30), box.getHeight() - 2);
+    label.setBorderSize(juce::BorderSize<int>(0));
     label.setFont(getComboBoxFont(box));
+    label.setMinimumHorizontalScale(1.0f);
   }
   void drawComboBox(juce::Graphics &g, int width, int height, bool, int, int, int, int,
                     juce::ComboBox &box) override {
@@ -82,7 +84,7 @@ public:
                     : box.findColour(juce::ComboBox::outlineColourId));
     g.drawRoundedRectangle(bounds, 5.0f, 1.0f);
     juce::Path arrow;
-    const float x = static_cast<float>(width) - 19.0f, y = static_cast<float>(height) / 2.0f;
+    const float x = static_cast<float>(width) - 14.0f, y = static_cast<float>(height) / 2.0f;
     arrow.startNewSubPath(x - 3.0f, y - 2.0f);
     arrow.lineTo(x, y + 1.0f);
     arrow.lineTo(x + 3.0f, y - 2.0f);
@@ -91,84 +93,103 @@ public:
   }
   void drawButtonBackground(juce::Graphics &g, juce::Button &button, const juce::Colour &,
                             bool highlighted, bool) override {
-    const bool tab = button.getComponentID() == "mode";
     const auto bounds = button.getLocalBounds().toFloat().reduced(0.5f);
     const float alpha = button.isEnabled() ? 1.0f : 0.45f;
-    if (!tab || button.getToggleState()) {
-      g.setColour((tab ? panel : control).withMultipliedAlpha(alpha));
-      g.fillRoundedRectangle(bounds, 5.0f);
-    }
-    if (!tab) {
-      g.setColour((button.isEnabled() && (highlighted || button.hasKeyboardFocus(true))
-                       ? accent
-                       : controlOutline)
-                      .withMultipliedAlpha(alpha));
-      g.drawRoundedRectangle(bounds, 5.0f, 1.0f);
-    } else if (button.hasKeyboardFocus(true)) {
-      g.setColour(accent);
-      g.drawRoundedRectangle(bounds.reduced(1.0f), 5.0f, 1.0f);
-    }
+    g.setColour((button.getToggleState() ? panel : control).withMultipliedAlpha(alpha));
+    g.fillRoundedRectangle(bounds, 5.0f);
+    g.setColour((button.isEnabled() && (highlighted || button.hasKeyboardFocus(true))
+                     ? accent
+                     : controlOutline)
+                    .withMultipliedAlpha(alpha));
+    g.drawRoundedRectangle(bounds, 5.0f, 1.0f);
   }
   void drawButtonText(juce::Graphics &g, juce::TextButton &button, bool, bool) override {
-    const bool tab = button.getComponentID() == "mode";
-    const auto colour = tab ? (button.getToggleState() ? accent : muted)
-                            : (button.getToggleState() ? accent : foreground);
+    const auto colour = button.getToggleState() ? accent : foreground;
     g.setColour(colour.withMultipliedAlpha(button.isEnabled() ? 1.0f : 0.45f));
-    g.setFont(juce::FontOptions(tab ? 12.0f : 13.0f));
+    g.setFont(juce::FontOptions(13.0f));
     g.drawFittedText(button.getButtonText(), button.getLocalBounds().reduced(6, 1),
-                     juce::Justification::centred, 1);
+                     juce::Justification::centred, 1, 1.0f);
+  }
+  void drawToggleButton(juce::Graphics &g, juce::ToggleButton &button, bool shouldDrawButtonAsHighlighted,
+                        bool shouldDrawButtonAsDown) override {
+    const float fontSize = 13.0f;
+    const float tickWidth = fontSize * 1.1f;
+    drawTickBox(g, button, 4.0f, (static_cast<float>(button.getHeight()) - tickWidth) * 0.5f,
+                tickWidth, tickWidth, button.getToggleState(), button.isEnabled(),
+                shouldDrawButtonAsHighlighted, shouldDrawButtonAsDown);
+    g.setColour(button.findColour(juce::ToggleButton::textColourId)
+                    .withMultipliedAlpha(button.isEnabled() ? 1.0f : 0.45f));
+    g.setFont(juce::FontOptions(fontSize));
+    const juce::Rectangle<int> textBounds(juce::roundToInt(4.0f + tickWidth + 6.0f), 0,
+                                          button.getWidth() - juce::roundToInt(tickWidth + 12.0f),
+                                          button.getHeight());
+    g.drawFittedText(button.getButtonText(), textBounds, juce::Justification::centredLeft, 1, 1.0f);
   }
 };
 
 class MuTheChordsEditor::PreviewKeyboard final : public juce::Component {
 public:
   explicit PreviewKeyboard(MuTheChordsEditor &editor) : owner(editor) {
-    setTitle("Preview keyboard C1 to B3");
+    updateTitle();
     setDescription("Click and hold a key to preview the current harmony.");
     setMouseCursor(juce::MouseCursor::PointingHandCursor);
   }
   ~PreviewKeyboard() override { release(); }
+  int baseNote() const { return base; }
+  void resetOctave() {
+    release();
+    if (base != 36) {
+      base = 36;
+      updateTitle();
+      repaint();
+    }
+  }
+  void shiftOctave(int delta) {
+    const int next = juce::jlimit(0, 84, base + delta * 12);
+    if (next == base) return;
+    release();
+    base = next;
+    updateTitle();
+    repaint();
+  }
   void paint(juce::Graphics &g) override {
     for (int pass = 0; pass < 2; ++pass)
-      for (int note = 36; note < 72; ++note) {
+      for (int note = base; note < base + 36; ++note) {
         const bool black = blackKey(note);
         if (black != (pass == 1)) continue;
         auto bounds = keyBounds(note);
         const bool full = owner.value("full") > 0.5f;
         const bool inRange = full || (note >= owner.value("low") && note <= owner.value("high"));
+        const bool scaleTone = isScaleTone(note);
+        const bool activeKey =
+            inRange ? (owner.value("mapping") > 0.5f ? !black : scaleTone) : scaleTone;
         const bool input = owner.processor.inputNote() == note;
         const bool invalid = input && owner.processor.inputOutside();
         const bool sounding = owner.processor.outputNote(note);
-        juce::Colour fill = black     ? juce::Colour(0xff242b2a)
-                            : inRange ? juce::Colour(0xffc8d6c5)
-                                      : juce::Colour(0xffdfe4df);
+        juce::Colour fill = black ? juce::Colour(0xff284260) : juce::Colour(0xff2a4564);
         if (sounding) fill = accent;
         if (input) fill = juce::Colour(0xffd58f91);
         if (invalid) fill = juce::Colour(0xff737b80);
+        const auto rect = bounds.reduced(1.0f);
         g.setColour(fill);
-        g.fillRoundedRectangle(bounds.reduced(0.5f), 3.0f);
-        g.setColour(background);
-        g.drawRoundedRectangle(bounds.reduced(0.5f), 3.0f, 1.0f);
-        if (inRange && !black && !invalid) {
-          g.setColour(juce::Colour(0xff89b57c));
-          g.fillRect(bounds.withHeight(4.0f).reduced(1.0f, 0.0f));
-        }
-        if (isScaleTone(note)) {
-          g.setColour(black ? juce::Colour(0xff9caf94) : juce::Colour(0xff819c78));
-          g.fillEllipse(bounds.getCentreX() - 2.5f, bounds.getBottom() - (black ? 12.0f : 25.0f),
-                        5.0f, 5.0f);
-        }
+        g.fillRoundedRectangle(rect, 3.0f);
+        const juce::Colour outline =
+            input && !invalid ? juce::Colour(0xffb8666d)
+            : sounding        ? juce::Colour(0xffdff6d8)
+            : activeKey       ? (inRange ? accent : juce::Colour(0xff93b3cf))
+                              : line.withAlpha(0.32f);
+        g.setColour(outline);
+        g.drawRoundedRectangle(rect, 3.0f,
+                               (activeKey || sounding || input) ? 1.6f : 1.0f);
         if (invalid) {
           g.setColour(juce::Colours::white);
           g.setFont(juce::FontOptions(13.0f));
           g.drawText("x", bounds.withY(8.0f).withHeight(16.0f), juce::Justification::centred);
         }
-        if (input && !invalid) {
-          g.setColour(juce::Colour(0xffb8666d));
-          g.drawRoundedRectangle(bounds.reduced(1.5f), 3.0f, 2.0f);
-        }
         if (!black) {
-          g.setColour(juce::Colour(0xff48514b));
+          g.setColour(sounding || (input && !invalid) ? juce::Colour(0xff172b43)
+                      : activeKey                     ? (inRange ? accent : foreground.withAlpha(0.85f))
+                                                      : muted.withAlpha(0.35f));
           g.setFont(juce::FontOptions(9.0f));
           g.drawText(noteName(note), bounds.withY(bounds.getBottom() - 17.0f).withHeight(14.0f),
                      juce::Justification::centred);
@@ -180,6 +201,9 @@ public:
   void mouseUp(const juce::MouseEvent &) override { release(); }
 
 private:
+  void updateTitle() {
+    setTitle("Preview keyboard " + noteName(base) + " to " + noteName(base + 35));
+  }
   bool isScaleTone(int note) const {
     const int pc = (note - static_cast<int>(owner.value("root")) + 120) % 12;
     const auto index = static_cast<size_t>(
@@ -189,7 +213,7 @@ private:
   }
   juce::Rectangle<float> keyBounds(int note) const {
     int whites = 0;
-    for (int n = 36; n < note; ++n)
+    for (int n = base; n < note; ++n)
       if (!blackKey(n)) ++whites;
     const float width = static_cast<float>(getWidth()) / 21.0f;
     if (blackKey(note))
@@ -200,7 +224,7 @@ private:
   void playAt(juce::Point<float> point) {
     int next = -1;
     for (int pass = 0; pass < 2 && next < 0; ++pass)
-      for (int note = 36; note < 72; ++note)
+      for (int note = base; note < base + 36; ++note)
         if (blackKey(note) == (pass == 0) && keyBounds(note).contains(point)) {
           next = note;
           break;
@@ -221,7 +245,7 @@ private:
     }
   }
   MuTheChordsEditor &owner;
-  int held = -1;
+  int base = 36, held = -1;
 };
 
 class MuTheChordsEditor::PatternGraph final : public juce::Component,
@@ -237,15 +261,25 @@ public:
                    "and right arrows move the start; Shift plus arrows move the end; Home "
                    "selects the full pattern. Enter or Space toggles preview.");
   }
+  void enablementChanged() override {
+    if (!isEnabled()) {
+      draggingRegion = false;
+      activationKeyDown = false;
+    }
+    setMouseCursor(isEnabled() ? juce::MouseCursor::PointingHandCursor
+                               : juce::MouseCursor::NormalCursor);
+    repaint();
+  }
   void paint(juce::Graphics &g) override {
-    g.setColour(graphBackground);
+    const float alpha = isEnabled() ? 1.0f : 0.45f;
+    g.setColour(graphBackground.withMultipliedAlpha(alpha));
     g.fillRoundedRectangle(getLocalBounds().toFloat(), 4.0f);
-    g.setColour(hasKeyboardFocus(true) ? accent : line);
+    g.setColour((isEnabled() && hasKeyboardFocus(true) ? accent : line).withMultipliedAlpha(alpha));
     g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(1.0f), 4.0f,
-                           hasKeyboardFocus(true) ? 2.0f : 1.0f);
+                           isEnabled() && hasKeyboardFocus(true) ? 2.0f : 1.0f);
     const auto *source = selected();
     if (source == nullptr || source->events.empty()) {
-      g.setColour(muted);
+      g.setColour(muted.withMultipliedAlpha(alpha));
       g.setFont(juce::FontOptions(12.0f));
       g.drawText(source == nullptr ? "Local pattern library unavailable"
                                    : "This pattern has no notes",
@@ -266,29 +300,29 @@ public:
         area.getX() + static_cast<float>(std::min(end, first * bar) / end) * area.getWidth();
     const float right =
         area.getX() + static_cast<float>(std::min(end, last * bar) / end) * area.getWidth();
-    g.setColour(background.withAlpha(.55f));
+    g.setColour(background.withAlpha(.55f * alpha));
     g.fillRect(area.withRight(left));
     g.fillRect(area.withLeft(right));
-    g.setColour(accent.withAlpha(.35f));
+    g.setColour(accent.withAlpha(.35f * alpha));
     g.fillRect(juce::Rectangle<float>(left, 1, right - left, 14));
-    g.setColour(accent);
+    g.setColour(accent.withMultipliedAlpha(alpha));
     g.fillRoundedRectangle(left - 3, 1, 6, 14, 3);
     g.fillRoundedRectangle(right - 3, 1, 6, 14, 3);
     g.setFont(juce::FontOptions(9.0f));
     const int stride = juce::jmax(1, static_cast<int>(std::ceil(end / bar / 16.0)));
     for (int b = 0; b * bar <= end; b += stride) {
       const float x = area.getX() + static_cast<float>(b * bar / end) * area.getWidth();
-      g.setColour(juce::Colour(0xff7890a5));
+      g.setColour(juce::Colour(0xff7890a5).withMultipliedAlpha(alpha));
       g.drawVerticalLine(juce::roundToInt(x), area.getY(), area.getBottom());
       if (x + 35 < getWidth() - 132) {
-        g.setColour(muted);
+        g.setColour(muted.withMultipliedAlpha(alpha));
         g.drawText(juce::String(b + 1), juce::roundToInt(x + 3), 2, 32, 12,
                    juce::Justification::left);
       }
     }
     if (end <= 64)
       for (int beat = 1; beat < end; ++beat) {
-        g.setColour(juce::Colour(0xff3c5972));
+        g.setColour(juce::Colour(0xff3c5972).withMultipliedAlpha(alpha));
         const float x = area.getX() + static_cast<float>(beat / end) * area.getWidth();
         g.drawVerticalLine(juce::roundToInt(x), area.getY(), area.getBottom());
       }
@@ -297,18 +331,19 @@ public:
         const float y = area.getBottom() -
                         (static_cast<float>(note - limits.first) + 0.5f) /
                             static_cast<float>(limits.second - limits.first + 1) * area.getHeight();
-        g.setColour(line);
+        g.setColour(line.withMultipliedAlpha(alpha));
         g.drawHorizontalLine(juce::roundToInt(y), area.getX(), area.getRight());
       }
-    g.setColour(muted);
+    g.setColour(muted.withMultipliedAlpha(alpha));
     g.drawText(noteName(limits.second), 3, 16, 34, 12, juce::Justification::left);
     g.drawText(noteName(limits.first), 3, getHeight() - 17, 34, 12, juce::Justification::left);
     for (const auto &event : source->events) {
-      g.setColour(accent.withAlpha(0.3f + 0.7f * juce::jlimit(0, 127, event.velocity) / 127.0f));
+      g.setColour(accent.withAlpha(
+          (0.3f + 0.7f * juce::jlimit(0, 127, event.velocity) / 127.0f) * alpha));
       g.fillRoundedRectangle(noteBounds(event), 1.5f);
     }
     if (owner.processor.performanceRunning()) {
-      g.setColour(juce::Colour(0xfff0ce8b));
+      g.setColour(juce::Colour(0xfff0ce8b).withMultipliedAlpha(alpha));
       const float x =
           area.getX() +
           static_cast<float>(juce::jlimit(0.0, 1.0, owner.processor.performancePhase())) *
@@ -317,7 +352,7 @@ public:
     }
   }
   void mouseDown(const juce::MouseEvent &event) override {
-    if (!event.mods.isLeftButtonDown()) return;
+    if (!isEnabled() || !event.mods.isLeftButtonDown()) return;
     grabKeyboardFocus();
     if (event.position.y < 17 && event.position.x >= plot().getX() - 4 &&
         event.position.x <= plot().getRight() + 4) {
@@ -339,10 +374,11 @@ public:
     togglePreview();
   }
   void mouseDrag(const juce::MouseEvent &event) override {
-    if (draggingRegion) moveHandle(event.position.x);
+    if (isEnabled() && draggingRegion) moveHandle(event.position.x);
   }
   void mouseUp(const juce::MouseEvent &) override { draggingRegion = false; }
   bool keyPressed(const juce::KeyPress &key) override {
+    if (!isEnabled()) return false;
     if (key.isKeyCode(juce::KeyPress::homeKey)) {
       owner.processor.setLoopRegion(0, 0);
       repaint();
@@ -547,6 +583,9 @@ MuTheChordsEditor::MuTheChordsEditor(MuTheChordsProcessor &p)
   addCombo(mapping, mappingLabel, "Mapping", {"Absolute", "Relative"}, "mapping");
   addCombo(outside, outsideLabel, "Outside scale",
            {"Ignore", "Pass note", "Snap down", "Snap up", "Nearest"}, "outside");
+  addCombo(mode, modeLabel, "Mode", {"Chords", "Performance"}, "mode");
+  addCombo(strum, strumLabel, "Strum", {"Off", "Up Fast", "Up Slow", "Down Fast", "Down Slow"},
+           "strum");
   addCombo(pedal, pedalLabel, "Pedal", {"Off", "Hold", "Chord Switch"}, "pedal");
   addCombo(alt, altLabel, "Alt Chord", chords, "alt");
   addCombo(polarity, polarityLabel, "Polarity", {"Normal", "Reversed"}, "polarity");
@@ -573,7 +612,9 @@ MuTheChordsEditor::MuTheChordsEditor(MuTheChordsProcessor &p)
     const auto title = entry.first == &category ? "Category" : "Pattern";
     entry.first->setTitle(title);
     entry.second->setText(title, juce::dontSendNotification);
+    entry.second->setBorderSize(juce::BorderSize<int>(0));
     entry.second->setFont(juce::FontOptions(11.0f));
+    entry.second->setMinimumHorizontalScale(1.0f);
     entry.second->setColour(juce::Label::textColourId, muted);
   }
   pattern.setComponentID("perfPattern");
@@ -620,14 +661,18 @@ MuTheChordsEditor::MuTheChordsEditor(MuTheChordsProcessor &p)
     patternGraph->repaint();
   };
   content.addAndMakeVisible(loopInfo);
+  loopInfo.setBorderSize(juce::BorderSize<int>(0));
   loopInfo.setColour(juce::Label::textColourId, muted);
-  loopInfo.setFont(juce::FontOptions(10.0f));
+  loopInfo.setFont(juce::FontOptions(11.0f));
+  loopInfo.setMinimumHorizontalScale(1.0f);
   loopInfo.setJustificationType(juce::Justification::centredRight);
   for (auto *button : {&resetDefaults, &harmonySync, &importProfile, &exportProfile})
     content.addAndMakeVisible(button);
   resetDefaults.setTooltip("Reset all settings to their defaults and stop "
                            "playback. Sync will turn off.");
   resetDefaults.onClick = [this] {
+    keyboard->resetOctave();
+    displayedPattern = -1;
     processor.resetToDefaults();
     timerCallback();
   };
@@ -644,8 +689,10 @@ MuTheChordsEditor::MuTheChordsEditor(MuTheChordsProcessor &p)
       std::make_unique<ButtonAttachment>(processor.parameters, "bypass", bypass));
   content.addAndMakeVisible(syncInfo);
   syncInfo.setText("All instances equal", juce::dontSendNotification);
+  syncInfo.setBorderSize(juce::BorderSize<int>(0));
   syncInfo.setColour(juce::Label::textColourId, muted);
   syncInfo.setFont(juce::FontOptions(11.0f));
+  syncInfo.setMinimumHorizontalScale(1.0f);
   syncInfo.setJustificationType(juce::Justification::centredRight);
   syncInfo.setTooltip("There is no leader. Key and Scale changes in any synced "
                       "instance are shared with the others.");
@@ -680,39 +727,57 @@ MuTheChordsEditor::MuTheChordsEditor(MuTheChordsProcessor &p)
       std::make_unique<ButtonAttachment>(processor.parameters, "full", full));
   buttonAttachments.push_back(
       std::make_unique<ButtonAttachment>(processor.parameters, "latch", latch));
-  for (auto *button : {&chordsTab, &performanceTab, &stop})
-    content.addAndMakeVisible(button);
+  content.addAndMakeVisible(stop);
   full.setComponentID("full");
   latch.setComponentID("latch");
-  chordsTab.setComponentID("mode");
-  performanceTab.setComponentID("mode");
-  chordsTab.onClick = [this] { setMode(0); };
-  performanceTab.onClick = [this] { setMode(1); };
   stop.onClick = [this] { processor.requestStop(); };
   stop.setTooltip("Stop sounding notes and release held chords.");
+  mode.setTooltip("Chords plays block harmony; Performance drives rhythmic patterns.");
+  strum.setTooltip("Spread chord note attacks across a few milliseconds in Chords mode.");
   transpose.setTooltip("Shift generated chords in semitones. Applies on the next trigger.");
   mapping.setTooltip("Absolute: scale notes trigger chords. Relative: white "
                      "keys select scale degrees.");
   keyboard = std::make_unique<PreviewKeyboard>(*this);
   content.addAndMakeVisible(*keyboard);
+  keyboardDown.setButtonText(juce::String::fromUTF8("−"));
+  keyboardUp.setButtonText("+");
+  keyboardDown.setTitle("Keyboard octave down");
+  keyboardUp.setTitle("Keyboard octave up");
+  keyboardDown.setName("Keyboard octave down");
+  keyboardUp.setName("Keyboard octave up");
+  for (auto *button : {&keyboardDown, &keyboardUp}) {
+    content.addAndMakeVisible(button);
+    button->setTooltip(button->getTitle());
+    button->setWantsKeyboardFocus(true);
+  }
+  keyboardDown.onClick = [this] {
+    keyboard->shiftOctave(-1);
+    timerCallback();
+  };
+  keyboardUp.onClick = [this] {
+    keyboard->shiftOctave(1);
+    timerCallback();
+  };
   patternGraph = std::make_unique<PatternGraph>(*this);
   content.addAndMakeVisible(*patternGraph);
   for (auto *label : {&outputTitle, &outputNotes, &patternSummary}) {
     content.addAndMakeVisible(label);
+    label->setBorderSize(juce::BorderSize<int>(0));
     label->setJustificationType(juce::Justification::centred);
     label->setColour(juce::Label::textColourId, foreground);
+    label->setMinimumHorizontalScale(1.0f);
   }
-  outputTitle.setFont(juce::FontOptions(20.0f));
+  outputTitle.setFont(juce::FontOptions(19.0f));
   outputNotes.setFont(juce::FontOptions(13.0f));
   outputTitle.setMinimumHorizontalScale(1.0f);
   outputNotes.setColour(juce::Label::textColourId, accent);
-  patternSummary.setFont(juce::FontOptions(10.0f));
-  patternSummary.setJustificationType(juce::Justification::left);
+  patternSummary.setFont(juce::FontOptions(11.0f));
+  patternSummary.setJustificationType(juce::Justification::centredLeft);
   patternSummary.setColour(juce::Label::textColourId, muted);
   setResizable(true, true);
-  setResizeLimits(570, 480, 1140, 960);
-  getConstrainer()->setFixedAspectRatio(760.0 / 640.0);
-  setSize(initialWidth, juce::roundToInt(initialWidth * 640.0 / 760.0));
+  setResizeLimits(570, 540, 1140, 1080);
+  getConstrainer()->setFixedAspectRatio(760.0 / 720.0);
+  setSize(initialWidth, juce::roundToInt(initialWidth * 720.0 / 760.0));
   timerCallback();
   startTimerHz(25);
 }
@@ -744,7 +809,9 @@ void MuTheChordsEditor::addCombo(juce::ComboBox &box, juce::Label &label, const 
   label.setComponentID(id);
   content.addAndMakeVisible(box);
   label.setText(title, juce::dontSendNotification);
+  label.setBorderSize(juce::BorderSize<int>(0));
   label.setFont(juce::FontOptions(11.0f));
+  label.setMinimumHorizontalScale(1.0f);
   label.setColour(juce::Label::textColourId, muted);
   content.addAndMakeVisible(label);
   if (juce::String(id) != "voicingPreset")
@@ -761,14 +828,6 @@ int MuTheChordsEditor::getControlParameterIndex(juce::Component &component) {
       return parameter->getParameterIndex();
   }
   return -1;
-}
-void MuTheChordsEditor::setMode(int mode) {
-  if (auto *parameter = processor.parameters.getParameter("mode")) {
-    parameter->beginChangeGesture();
-    parameter->setValueNotifyingHost(parameter->convertTo0to1(static_cast<float>(mode)));
-    parameter->endChangeGesture();
-  }
-  timerCallback();
 }
 void MuTheChordsEditor::chooseProfile(bool exporting) {
   if (!importProfile.isEnabled() || !exportProfile.isEnabled()) return;
@@ -857,8 +916,8 @@ void MuTheChordsEditor::fillPatterns(const juce::String &selectedCategory, int s
 void MuTheChordsEditor::syncPatternSelectors() {
   const auto &list = processor.patternList();
   const int selected = processor.selectedPatternIndex();
-  previousPattern.setEnabled(adjacentPattern(-1) >= 0);
-  nextPattern.setEnabled(adjacentPattern(1) >= 0);
+  previousPattern.setEnabled(performanceMode && adjacentPattern(-1) >= 0);
+  nextPattern.setEnabled(performanceMode && adjacentPattern(1) >= 0);
   if (displayedPattern == selected) return;
   displayedPattern = selected;
   if (!juce::isPositiveAndBelow(selected, static_cast<int>(list.size()))) return;
@@ -887,34 +946,29 @@ void MuTheChordsEditor::syncPatternSelectors() {
 void MuTheChordsEditor::timerCallback() {
   if (processor.takeEditorSizeRestore()) {
     const int width = processor.savedEditorWidth();
-    setSize(width, juce::roundToInt(width * 640.0 / 760.0));
+    setSize(width, juce::roundToInt(width * 720.0 / 760.0));
   }
   syncInfo.setVisible(value("harmonySync") > 0.5f);
-  const bool modeChanged = performanceMode != (value("mode") > 0.5f);
   performanceMode = value("mode") > 0.5f;
-  dawSync.setVisible(performanceMode);
+  strum.setEnabled(!performanceMode);
+  strumLabel.setEnabled(!performanceMode);
+  dawSync.setEnabled(performanceMode);
+  keyboardDown.setEnabled(keyboard->baseNote() > 0);
+  keyboardUp.setEnabled(keyboard->baseNote() < 84);
   latch.setEnabled(!performanceMode || value("perfPlayback") < .5f);
   latch.setTooltip(performanceMode && value("perfPlayback") > .5f
                        ? "Latch applies in Held playback mode."
                        : "Keep playing after key release; press the same key to stop.");
-  chordsTab.setToggleState(!performanceMode, juce::dontSendNotification);
-  performanceTab.setToggleState(performanceMode, juce::dontSendNotification);
-  for (juce::Component *component :
-       std::initializer_list<juce::Component *>{&low, &lowLabel, &high, &highLabel, &mapping,
-                                                &mappingLabel, &outside, &outsideLabel, &full})
-    component->setVisible(!performanceMode);
   const bool useAlt = value("pedal") > 1.5f;
   alt.setVisible(useAlt);
   altLabel.setVisible(useAlt);
   low.setEnabled(value("full") < 0.5f);
   high.setEnabled(value("full") < 0.5f);
   for (juce::Component *component : std::initializer_list<juce::Component *>{
-           &category,    &categoryLabel, &pattern,         &patternLabel,     &previousPattern,
-           &nextPattern, &rate,          &rateLabel,       &division,         &divisionLabel,
-           &voices,      &voicesLabel,   &passing,         &passingLabel,     &change,
-           &changeLabel, &transition,    &transitionLabel, &playback,         &playbackLabel,
-           &fullLoop,    &loopInfo,      &patternSummary,  patternGraph.get()})
-    component->setVisible(performanceMode);
+           &rate, &rateLabel, &division, &divisionLabel, &voices, &voicesLabel, &passing,
+           &passingLabel, &change, &changeLabel, &transition, &transitionLabel, &playback,
+           &playbackLabel, &fullLoop, &loopInfo, &patternSummary, patternGraph.get()})
+    component->setEnabled(performanceMode);
   syncPatternSelectors();
   {
     const auto region = processor.loopRegion();
@@ -924,9 +978,11 @@ void MuTheChordsEditor::timerCallback() {
                          : "Loop: Full",
                      juce::dontSendNotification);
   }
-  category.setEnabled(!processor.patternList().empty());
-  pattern.setEnabled(!processor.patternList().empty());
-  if (modeChanged) resized();
+  const bool hasPatterns = !processor.patternList().empty();
+  category.setEnabled(performanceMode && hasPatterns);
+  categoryLabel.setEnabled(performanceMode && hasPatterns);
+  pattern.setEnabled(performanceMode && hasPatterns);
+  patternLabel.setEnabled(performanceMode && hasPatterns);
   patternGraph->repaint();
   processor.readDisplaySnapshot(currentDisplay);
   currentChord = currentDisplay.chord;
@@ -967,7 +1023,8 @@ void MuTheChordsEditor::timerCallback() {
                juce::String::fromUTF8(muthechords::chordName(currentChord, notation).c_str()) +
                (solo ? " + solo" : "");
   }
-  for (auto *box : {&root, &scale, &chord, &low, &high, &outside, &pedal, &alt, &polarity})
+  for (auto *box :
+       {&root, &scale, &chord, &low, &high, &outside, &mode, &strum, &pedal, &alt, &polarity})
     box->setTooltip(box->getText());
   const int maxChordType = std::max(static_cast<int>(value("chord")),
                                     value("pedal") > 1.5f ? static_cast<int>(value("alt")) : 0);
@@ -991,9 +1048,9 @@ void MuTheChordsEditor::timerCallback() {
 void MuTheChordsEditor::paint(juce::Graphics &g) {
   g.fillAll(background);
   const float zoom =
-      std::min(static_cast<float>(getWidth()) / 760.0f, static_cast<float>(getHeight()) / 640.0f);
+      std::min(static_cast<float>(getWidth()) / 760.0f, static_cast<float>(getHeight()) / 720.0f);
   g.addTransform(juce::AffineTransform::scale(zoom).translated(
-      (getWidth() - 760.0f * zoom) * 0.5f, (getHeight() - 640.0f * zoom) * 0.5f));
+      (getWidth() - 760.0f * zoom) * 0.5f, (getHeight() - 720.0f * zoom) * 0.5f));
   const juce::Font titleFont(juce::FontOptions(18.0f, juce::Font::bold));
   g.setColour(foreground);
   g.setFont(titleFont);
@@ -1008,27 +1065,19 @@ void MuTheChordsEditor::paint(juce::Graphics &g) {
   g.setColour(line);
   g.drawHorizontalLine(36, 0.0f, 760.0f);
   drawGroup(g, {16, 50, 728, 65}, "Harmony");
-  g.setColour(line);
-  g.drawHorizontalLine(152, 16.0f, 744.0f);
-  const auto active = performanceMode ? performanceTab.getBounds() : chordsTab.getBounds();
-  g.setColour(accent);
-  g.fillRect(active.getX(), 151, active.getWidth(), 2);
-  if (performanceMode) {
-    drawGroup(g, {16, 168, 728, 160}, "Pattern");
-    drawGroup(g, {16, 339, 728, 157}, "Performance");
-  } else {
-    drawGroup(g, {16, 168, 728, 70}, "Keyboard range");
-    drawGroup(g, {16, 257, 728, 70}, "Play");
-  }
-  drawGroup(g, {16, 508, 728, 48}, "Output", juce::Colour(0xff294b69));
+  drawGroup(g, {16, 129, 728, 70}, "Keyboard range");
+  drawGroup(g, {16, 213, 728, 70}, "Play");
+  drawGroup(g, {16, 297, 728, 160}, "Pattern");
+  drawGroup(g, {16, 471, 728, 105}, "Performance");
+  drawGroup(g, {16, 588, 728, 48}, "Output", juce::Colour(0xff294b69));
   g.setFont(juce::FontOptions(10.0f));
   g.setColour(muted);
   const auto wheel = [&](float x, const char *name, int value, int maximum) {
     g.setColour(muted);
-    g.setFont(juce::FontOptions(8.0f));
-    g.drawText(name, juce::Rectangle<float>(x - 10.0f, 571.0f, 32.0f, 10.0f),
+    g.setFont(juce::FontOptions(9.0f));
+    g.drawText(name, juce::Rectangle<float>(x - 10.0f, 651.0f, 32.0f, 10.0f),
                juce::Justification::centred);
-    const juce::Rectangle<float> track(x, 582.0f, 12.0f, 45.0f);
+    const juce::Rectangle<float> track(x, 662.0f, 12.0f, 45.0f);
     g.setColour(graphBackground);
     g.fillRoundedRectangle(track, 6.0f);
     g.setColour(line);
@@ -1039,18 +1088,22 @@ void MuTheChordsEditor::paint(juce::Graphics &g) {
     g.setColour(value < 0 ? muted.withAlpha(0.35f) : accent);
     g.fillRoundedRectangle(x + 2.0f, y - 2.0f, 8.0f, 4.0f, 2.0f);
   };
-  wheel(27.0f, "BEND", processor.inputPitchBend(), 16383);
-  wheel(59.0f, "MOD", processor.inputModWheel(), 127);
+  wheel(21.0f, "BEND", processor.inputPitchBend(), 16383);
+  wheel(46.0f, "MOD", processor.inputModWheel(), 127);
+  g.setColour(muted);
+  g.setFont(juce::FontOptions(9.0f));
+  g.drawText("OCT", juce::Rectangle<float>(63.0f, 651.0f, 28.0f, 10.0f),
+             juce::Justification::centred);
 }
 void MuTheChordsEditor::resized() {
   if (getWidth() >= 570) processor.rememberEditorWidth(getWidth());
   // Keep one logical coordinate system. JUCE applies the host's DPI transform
   // to the whole editor independently of this user-controlled size adjustment.
   const float zoom =
-      std::min(static_cast<float>(getWidth()) / 760.0f, static_cast<float>(getHeight()) / 640.0f);
-  content.setBounds(0, 0, 760, 640);
+      std::min(static_cast<float>(getWidth()) / 760.0f, static_cast<float>(getHeight()) / 720.0f);
+  content.setBounds(0, 0, 760, 720);
   content.setTransform(juce::AffineTransform::scale(zoom).translated(
-      (getWidth() - 760.0f * zoom) * 0.5f, (getHeight() - 640.0f * zoom) * 0.5f));
+      (getWidth() - 760.0f * zoom) * 0.5f, (getHeight() - 720.0f * zoom) * 0.5f));
   auto field = [](juce::ComboBox &box, juce::Label &label, int x, int y, int width) {
     label.setBounds(x, y, width, 14);
     box.setBounds(x, y + 16, width, 28);
@@ -1060,49 +1113,44 @@ void MuTheChordsEditor::resized() {
   field(chord, chordLabel, 341, 59, 118);
   field(inversion, inversionLabel, 469, 59, 118);
   field(transpose, transposeLabel, 597, 59, 134);
-  resetDefaults.setBounds(222, 5, 70, 26);
-  syncInfo.setBounds(310, 5, 162, 26);
-  harmonySync.setBounds(482, 5, 78, 26);
-  importProfile.setBounds(568, 5, 78, 26);
-  exportProfile.setBounds(654, 5, 78, 26);
-  chordsTab.setBounds(16, 125, 100, 27);
-  performanceTab.setBounds(120, 125, 125, 27);
-  bypass.setBounds(654, 121, 78, 27);
-  field(low, lowLabel, 29, 179, 100);
-  field(high, highLabel, 139, 179, 100);
-  full.setBounds(249, 195, 107, 28);
-  field(mapping, mappingLabel, 368, 179, 172);
-  field(outside, outsideLabel, 550, 179, 181);
-  field(pedal, pedalLabel, 29, 268, 160);
-  field(polarity, polarityLabel, 199, 268, 113);
-  field(alt, altLabel, 322, 268, 147);
-  latch.setBounds(500, 284, 100, 28);
-  stop.setBounds(621, 284, 110, 28);
-  field(category, categoryLabel, 29, 178, 230);
-  field(pattern, patternLabel, 271, 178, 388);
-  previousPattern.setBounds(671, 194, 28, 28);
-  nextPattern.setBounds(703, 194, 28, 28);
-  patternGraph->setBounds(29, 228, 702, 76);
-  patternSummary.setBounds(29, 306, 520, 16);
-  loopInfo.setBounds(552, 306, 105, 20);
-  fullLoop.setBounds(667, 306, 64, 20);
-  field(rate, rateLabel, 29, 346, 166);
-  field(division, divisionLabel, 207, 346, 166);
-  field(voices, voicesLabel, 385, 346, 166);
-  field(passing, passingLabel, 563, 346, 168);
-  field(change, changeLabel, 29, 393, 226);
-  field(transition, transitionLabel, 267, 393, 226);
-  field(playback, playbackLabel, 505, 393, 226);
-  if (performanceMode) {
-    field(pedal, pedalLabel, 29, 442, 160);
-    field(polarity, polarityLabel, 199, 442, 113);
-    field(alt, altLabel, 322, 442, 147);
-    latch.setBounds(480, 458, 75, 28);
-    dawSync.setBounds(560, 458, 105, 28);
-    stop.setBounds(670, 458, 61, 28);
-  }
-  outputTitle.setBounds(34, 516, 692, 22);
-  outputNotes.setBounds(34, 538, 692, 16);
-  spelling.setBounds(640, 498, 91, 18);
-  keyboard->setBounds(90, 572, 654, 60);
+  resetDefaults.setBounds(212, 5, 68, 26);
+  syncInfo.setBounds(286, 5, 134, 26);
+  harmonySync.setBounds(426, 5, 72, 26);
+  importProfile.setBounds(504, 5, 74, 26);
+  exportProfile.setBounds(584, 5, 74, 26);
+  bypass.setBounds(664, 5, 67, 26);
+  field(low, lowLabel, 29, 140, 100);
+  field(high, highLabel, 139, 140, 100);
+  full.setBounds(249, 156, 107, 28);
+  field(mapping, mappingLabel, 368, 140, 172);
+  field(outside, outsideLabel, 550, 140, 181);
+  field(mode, modeLabel, 29, 224, 114);
+  field(strum, strumLabel, 151, 224, 108);
+  field(pedal, pedalLabel, 267, 224, 124);
+  field(polarity, polarityLabel, 399, 224, 96);
+  field(alt, altLabel, 503, 224, 72);
+  latch.setBounds(583, 240, 62, 28);
+  stop.setBounds(653, 240, 78, 28);
+  field(category, categoryLabel, 29, 307, 195);
+  field(pattern, patternLabel, 232, 307, 338);
+  previousPattern.setBounds(578, 323, 28, 28);
+  nextPattern.setBounds(610, 323, 28, 28);
+  dawSync.setBounds(646, 323, 85, 28);
+  patternGraph->setBounds(29, 357, 702, 76);
+  patternSummary.setBounds(29, 434, 520, 20);
+  loopInfo.setBounds(552, 434, 105, 20);
+  fullLoop.setBounds(667, 434, 64, 20);
+  field(rate, rateLabel, 29, 478, 166);
+  field(division, divisionLabel, 207, 478, 166);
+  field(voices, voicesLabel, 385, 478, 166);
+  field(passing, passingLabel, 563, 478, 168);
+  field(change, changeLabel, 29, 525, 226);
+  field(transition, transitionLabel, 267, 525, 226);
+  field(playback, playbackLabel, 505, 525, 226);
+  outputTitle.setBounds(118, 596, 524, 22);
+  outputNotes.setBounds(118, 618, 524, 16);
+  spelling.setBounds(644, 598, 87, 28);
+  keyboardUp.setBounds(66, 662, 22, 21);
+  keyboardDown.setBounds(66, 686, 22, 21);
+  keyboard->setBounds(96, 652, 648, 60);
 }

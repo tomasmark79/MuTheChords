@@ -16,7 +16,7 @@
 - **`MuTheChords` CLI Application** — a command-line inspection and preview utility powered by `MuTheChordsLib` and `UtilsFactory`.
 
 <p align="center">
-  <img src="docs/images/MuTheChords-chords.png" alt="MuTheChords VST3/CLAP Plugin UI" width="85%">
+  <img src="docs/images/MuTheChords-chords.png" alt="MuTheChords VST3/CLAP Plugin UI" width="760">
 </p>
 
 ## Online Documentation & Web Preview
@@ -35,7 +35,7 @@
 | **Keys & Scales** | **12 Keys** (`C`–`B`) and **44 Scales** including Major, Dorian, Phrygian, Lydian, Mixolydian, Minor, Locrian, Harmonic/Melodic Minor, Harmonic Major, Pentatonics, Blues, Bebop, Hungarian, Persian, Hirajoshi, Whole Tone, Diminished, Altered, Chromatic, and Iwato. |
 | **Chord Types** | Stacks scale degrees into **Thirds**, **Triads**, **7th**, **9th**, **11th**, and **13th** chords. |
 | **15 Voicing Modes** | **Inversions**: Root, 1st–6th inversion.<br>**Spread**: *Bass down*, *Top up*, *Open*, *Wide*, *Drop 2*.<br>**Octaves**: *Bass octave* (adds root below), *Octave up*, *Octave down*. |
-| **Transposition** | Shifts generated chord output by **-36 to +36 semitones** without affecting solo pass-through notes. |
+| **Transposition & Strum** | Shifts generated chord output by **-36 to +36 semitones** without affecting solo pass-through notes, with optional **Strum** (*Up Fast*, *Up Slow*, *Down Fast*, *Down Slow*) in `Chords` mode. |
 | **Chord Naming** | Context-aware chord symbol detection (e.g., `Dm7/F`, `Cmaj11(#11)`) with selectable **Auto**, **Flats (`♭`)**, or **Sharps (`♯`)** enharmonic spelling. |
 
 ### 2. Keyboard Range, Mapping & Controllers
@@ -47,7 +47,7 @@
 | **Outside-Scale Policy** | Choose **Ignore**, **Pass note**, **Snap down**, **Snap up**, or **Nearest** for non-scale input keys. |
 | **Sustain Pedal (CC64)** | Selectable **Normal** (`64–127`) or **Reversed** (`0–63`) polarity.<br>Modes: **Off**, **Hold** (sustains chord until pedal release), or **Chord Switch** (selects `Alt Chord` while pedal is held). |
 | **Latch & Stop** | **Latch** holds the triggered chord after key release (re-triggering the same key toggles it off). **Stop** and **Bypass** cleanly release all active voices. |
-| **MIDI Transparency** | Retains input velocity, MIDI channels (`1`–`16`), 14-bit pitch bend, mod wheel (`CC1`), and aftertouch, with live **BEND** and **MOD** indicators. |
+| **MIDI Transparency & Preview** | Retains input velocity (including dynamic velocity scaling in `Performance` mode), MIDI channels (`1`–`16`), 14-bit pitch bend, mod wheel (`CC1`), and aftertouch, with live **BEND**/**MOD** indicators and an octave-shiftable (`OCT +/-`) preview keyboard. |
 
 ### 3. Rhythmic Pattern Engine (`Performance` Mode)
 
@@ -63,7 +63,7 @@
 
 - **Shared Harmony (`Sync`)**: Peer-to-peer synchronization of `Key` and `Scale` across multiple plugin instances (`All instances equal`), even across separate VST3/CLAP host processes.
 - **External Profiles (`.chordprofile`)**: Atomic JSON Import/Export (`MuTheChordsProfile` v2) for storing complete Harmony, Performance, and per-pattern loop regions independently of DAW projects.
-- **DAW Automation & Remote Controls**: All 32 parameters are automatable and support VST3 parameter-under-mouse identification for Bitwig Studio Remote Controls.
+- **DAW Automation & Remote Controls**: All 33 parameters are automatable and support VST3 parameter-under-mouse identification for Bitwig Studio Remote Controls.
 
 ---
 

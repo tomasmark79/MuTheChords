@@ -149,7 +149,7 @@ namespace muthechords {
       if (id.isNotEmpty() && id != "perfPreview" && parameters.getParameter(id) != nullptr &&
           !values->hasProperty(id)) {
         if (id == "perfPlayback" || id == "perfLoopStart" || id == "perfLoopEnd" ||
-            id == "voicingPreset") {
+            id == "voicingPreset" || id == "strum") {
           auto *p = parameters.getParameter(id);
           child.setProperty("value", p->convertFrom0to1(p->getDefaultValue()), nullptr);
         } else {

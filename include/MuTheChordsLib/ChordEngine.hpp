@@ -10,13 +10,13 @@ namespace muthechords {
 
   struct Settings {
     int root = 0, scale = 0, chord = 1, inversion = 0, transpose = 0;
-    int low = 36, high = 59, mapping = 0, outside = 0, pedal = 0, alt = 2, mode = 0;
+    int low = 36, high = 59, mapping = 0, outside = 0, pedal = 0, alt = 2, mode = 0, strum = 0;
     bool full = false, latch = false, pedalReversed = false;
   };
 
   struct Event {
     bool on;
-    int channel, note, velocity;
+    int channel, note, velocity, voiceIndex = 0, voiceCount = 1;
   };
 
   class Engine {
@@ -44,6 +44,7 @@ namespace muthechords {
       next.outside = std::clamp(next.outside, 0, 4);
       next.pedal = std::clamp(next.pedal, 0, 2);
       next.mode = std::clamp(next.mode, 0, 1);
+      next.strum = std::clamp(next.strum, 0, 4);
       if (next.mode != config.mode) {
         reset();
       } else if (config.latch && !next.latch) {
@@ -169,16 +170,20 @@ namespace muthechords {
       triggerChannel = channel;
       keyHeld = true;
       chordHold = config.pedal == 1;
+      int validCount = 0;
       for (int i = 0; i < count; ++i) {
         const int out = notes[static_cast<size_t>(i)] + config.transpose;
         if (out < 0 || out > 127) {
           continue;
         }
-        if (chordCount > 0 && chordNotes[static_cast<size_t>(chordCount - 1)] == out) {
+        if (validCount > 0 && chordNotes[static_cast<size_t>(validCount - 1)] == out) {
           continue;
         }
-        chordNotes[static_cast<size_t>(chordCount++)] = out;
-        acquire(channel, out, velocity);
+        chordNotes[static_cast<size_t>(validCount++)] = out;
+      }
+      chordCount = validCount;
+      for (int i = 0; i < chordCount; ++i) {
+        acquire(channel, chordNotes[static_cast<size_t>(i)], velocity, i, chordCount);
       }
       soundingChord = {};
       soundingChord.root = base + config.transpose;
@@ -296,9 +301,9 @@ namespace muthechords {
       }
     }
 
-    void acquire(int c, int n, int v) {
+    void acquire(int c, int n, int v, int voiceIndex = 0, int voiceCount = 1) {
       if (owners[static_cast<size_t>(c - 1)][static_cast<size_t>(n)]++ == 0) {
-        emit({true, c, n, v});
+        emit({true, c, n, v, voiceIndex, voiceCount});
       }
     }
 

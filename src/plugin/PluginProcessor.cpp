@@ -92,6 +92,7 @@ APVTS::ParameterLayout
   for (int i = muthechords::bassDown; i < muthechords::voicingCount; ++i)
     voicingModes.add(muthechords::voicingNames[static_cast<size_t>(i)]);
   choice("voicingPreset", "Voicing", voicingModes, 0);
+  choice("strum", "Strum", {"Off", "Up Fast", "Up Slow", "Down Fast", "Down Slow"}, 0);
   return layout;
 }
 MuTheChordsProcessor::MuTheChordsProcessor(std::string harmonyChannel)
@@ -331,6 +332,11 @@ void MuTheChordsProcessor::resetToDefaults() {
   performancePreviewRequest.store(-1);
   previewRequest.store(-1);
   reportedPlayback.store(-1);
+  lastPitchBend.store(-1);
+  lastModWheel.store(-1);
+  lastInput.store(-1);
+  lastOutside.store(false);
+  chordDisplay.publish({});
   resetPerformanceInput.store(true);
   stateRestored.store(true);
   restoring.store(false);
@@ -385,6 +391,7 @@ muthechords::Settings MuTheChordsProcessor::readSettings() const {
   s.alt = value("alt");
   s.latch = value("latch") != 0;
   s.mode = value("mode");
+  s.strum = value("strum");
   s.pedalReversed = value("polarity") != 0;
   return s;
 }
@@ -515,7 +522,7 @@ void MuTheChordsProcessor::handleNoteOn(int channel, int note, int velocity, dou
     performance.trigger(harmony, channel, beat,
                         playing && parameters.getRawParameterValue("perfDawSync")->load() > .5f &&
                             releasedForRestart != eventOffset,
-                        knownTempo.load() / (60 * sampleRate));
+                        knownTempo.load() / (60 * sampleRate), velocity);
 }
 void MuTheChordsProcessor::handleNoteOff(int channel, int note, const muthechords::Settings &s) {
   if (s.mode == 0) {
@@ -547,6 +554,7 @@ void MuTheChordsProcessor::processBlock(juce::AudioBuffer<float> &audio, juce::M
   audio.clear();
   output.clear();
   eventOffset = 0;
+  blockSamples = std::max(1, audio.getNumSamples());
   releasedForRestart = -1;
   if (userBypassed) {
     for (int c = 0; c < 16; ++c)
@@ -558,7 +566,19 @@ void MuTheChordsProcessor::processBlock(juce::AudioBuffer<float> &audio, juce::M
   }
   engine.setOutput(this, [](void *raw, muthechords::Event e) {
     auto &p = *static_cast<MuTheChordsProcessor *>(raw);
-    p.emit(e, p.eventOffset);
+    int offset = p.eventOffset;
+    if (e.on && e.voiceCount > 1) {
+      const int strum = p.engine.settings().strum;
+      if (strum > 0) {
+        const bool down = strum >= 3;
+        const bool slow = strum == 2 || strum == 4;
+        const int order = down ? (e.voiceCount - 1 - e.voiceIndex) : e.voiceIndex;
+        const int stepSamples =
+            std::max(1, static_cast<int>(std::round((slow ? 0.012 : 0.005) * p.sampleRate)));
+        offset = std::min(p.blockSamples - 1, p.eventOffset + order * stepSamples);
+      }
+    }
+    p.emit(e, offset);
   });
   performance.setOutput(this, [](void *raw, muthechords::Event e, int sample) {
     static_cast<MuTheChordsProcessor *>(raw)->emit(e, sample);
@@ -594,9 +614,10 @@ void MuTheChordsProcessor::processBlock(juce::AudioBuffer<float> &audio, juce::M
   const bool requestedStop = stopRequested.exchange(false);
   if (restored || changedMode || transportStop || takeover || discontinuity || positionLost ||
       requestedStop) {
-    stopAll();
+    stopAll(restored);
     previewHeld = -1;
     lastInput.store(-1);
+    lastOutside.store(false);
     // Explicit stop/restoration/transport discontinuities also cancel queued UI
     // starts.
     if (restored || transportStop || takeover || discontinuity || positionLost || requestedStop) {
@@ -611,12 +632,13 @@ void MuTheChordsProcessor::processBlock(juce::AudioBuffer<float> &audio, juce::M
   const bool wasActive = performance.isActive();
   const auto previousHarmony = performance.snapshot();
   const int previousChannel = performance.currentChannel();
+  const int previousVelocity = performance.currentVelocity();
   performance.configure(selected >= 0 && selected < static_cast<int>(patterns.size())
                             ? &patterns[static_cast<size_t>(selected)]
                             : nullptr,
                         readPerformanceSettings());
   if (wasActive && !performance.isActive() && settings.mode == 1)
-    performance.trigger(previousHarmony, previousChannel, startBeat, false);
+    performance.trigger(previousHarmony, previousChannel, startBeat, false, 0, previousVelocity);
   if (settings.mode == 1 && readPerformanceSettings().playback == 0 && !previewActive.load() &&
       ((oldSettings.latch && !settings.latch) ||
        (!performanceKeyHeld && !settings.latch && settings.pedal != 1 && oldSettings.pedal == 1))) {

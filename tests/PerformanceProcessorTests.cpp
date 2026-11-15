@@ -641,7 +641,7 @@ int main(int argc, char **argv) {
     }
     {
       std::unique_ptr<juce::AudioProcessorEditor> editor(r.p.createEditor());
-      require(editor->isResizable() && editor->getHeight() <= 640,
+      require(editor->isResizable() && editor->getHeight() <= 720,
               "compact resizable editor fits the reported display");
       std::vector<juce::Component *> components;
       const auto collect = [&](auto &&self, juce::Component &parent) -> void {
@@ -755,7 +755,7 @@ int main(int argc, char **argv) {
       set(r.p, "full", 1);
       r.empty();
       for (const auto size :
-           std::array<std::pair<int, int>, 3>{{{760, 640}, {570, 480}, {900, 550}}}) {
+           std::array<std::pair<int, int>, 3>{{{760, 720}, {570, 540}, {900, 620}}}) {
         editor->setSize(size.first, size.second);
         for (const float dpi : {1.0f, 1.5f, 2.0f}) {
           editor->setScaleFactor(dpi);
@@ -786,12 +786,12 @@ int main(int argc, char **argv) {
           juce::PNGImageFormat format;
           require(format.writeImageToStream(image, file), "performance editor screenshot");
         };
-        capture(destination, 760, 640, 1);
+        capture(destination, 760, 720, 1);
         capture(destination.getSiblingFile(destination.getFileNameWithoutExtension() + "-150.png"),
-                760, 640, 1.5f);
+                760, 720, 1.5f);
         capture(destination.getSiblingFile(destination.getFileNameWithoutExtension() +
                                            "-small-200.png"),
-                570, 480, 2);
+                570, 540, 2);
       }
     }
     {

@@ -21,7 +21,6 @@ private:
   using ComboAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
   using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
   void timerCallback() override;
-  void setMode(int);
   void selectPattern(int);
   int adjacentPattern(int direction) const;
   void chooseProfile(bool exporting);
@@ -37,17 +36,19 @@ private:
   std::unique_ptr<PreviewKeyboard> keyboard;
   std::unique_ptr<PatternGraph> patternGraph;
   std::unique_ptr<juce::FileChooser> profileChooser;
-  HoverComboBox root, scale, chord, inversion, transpose, low, high, mapping, outside, pedal, alt,
-      polarity, spelling;
+  HoverComboBox root, scale, chord, inversion, transpose, low, high, mapping, outside, mode, strum,
+      pedal, alt, polarity, spelling;
   juce::Label spellingLabel;
   juce::Label rootLabel, scaleLabel, chordLabel, inversionLabel, transposeLabel;
-  juce::Label lowLabel, highLabel, mappingLabel, outsideLabel, pedalLabel, altLabel, polarityLabel;
+  juce::Label lowLabel, highLabel, mappingLabel, outsideLabel, modeLabel, strumLabel, pedalLabel,
+      altLabel, polarityLabel;
   juce::Label outputTitle, outputNotes, patternSummary;
   juce::Label loopInfo;
   HoverComboBox category, pattern, rate, division, voices, passing, change, transition, playback;
   juce::Label categoryLabel, patternLabel, rateLabel, divisionLabel, voicesLabel, passingLabel,
       changeLabel, transitionLabel, playbackLabel;
   juce::TextButton previousPattern, nextPattern;
+  juce::TextButton keyboardDown, keyboardUp;
   juce::TextButton fullLoop{"Full"};
   juce::TextButton importProfile{"Import"}, exportProfile{"Export"};
   juce::TextButton harmonySync{"Sync"};
@@ -56,7 +57,7 @@ private:
   juce::Label syncInfo;
   juce::StringArray categories;
   int displayedPattern = -1;
-  juce::TextButton chordsTab{"Chords"}, performanceTab{"Performance"}, stop{"Stop"};
+  juce::TextButton stop{"Stop"};
   juce::ToggleButton full{"Full range"}, latch{"Latch"};
   juce::ToggleButton dawSync{"DAW Sync"};
   std::vector<std::unique_ptr<ComboAttachment>> comboAttachments;

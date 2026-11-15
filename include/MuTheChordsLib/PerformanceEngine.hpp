@@ -84,15 +84,17 @@ namespace muthechords {
     }
 
     void trigger(ChordSnapshot chord, int channel, double hostBeat, bool quantize,
-                 double boundaryTolerance = 0) {
+                 double boundaryTolerance = 0, int inputVelocity = 100) {
       if (!usable() || chord.count <= 0 || !std::isfinite(hostBeat)) {
         return;
       }
       chord.count = std::clamp(chord.count, 0, 8);
       channel = std::clamp(channel, 1, 16);
+      inputVelocity = std::clamp(inputVelocity, 1, 127);
       if (!active) {
         harmony = chord;
         outputChannel = channel;
+        triggerVelocity = inputVelocity;
         active = true;
         origin = quantize ? nextQuarter(hostBeat, boundaryTolerance) : hostBeat;
         searchPosition = 0;
@@ -100,10 +102,11 @@ namespace muthechords {
       } else if (config.change == 2) {
         pendingChord = chord;
         pendingChannel = channel;
+        pendingVelocity = inputVelocity;
         pendingBeat = nextQuarter(hostBeat, boundaryTolerance);
         pending = true;
       } else {
-        changeHarmony(chord, channel);
+        changeHarmony(chord, channel, inputVelocity);
         if (config.change == 1) {
           origin = hostBeat;
           searchPosition = 0;
@@ -201,7 +204,7 @@ namespace muthechords {
           break;
         }
         if (pending && pendingBeat <= now + epsilon) {
-          changeHarmony(pendingChord, pendingChannel);
+          changeHarmony(pendingChord, pendingChannel, pendingVelocity);
           pending = false;
         }
         // Usually one position; handles several events rounding to the same
@@ -246,6 +249,7 @@ namespace muthechords {
     [[nodiscard]] double phase() const { return lastPhase; }
     [[nodiscard]] bool isActive() const { return active; }
     [[nodiscard]] int currentChannel() const { return outputChannel; }
+    [[nodiscard]] int currentVelocity() const { return triggerVelocity; }
 
   private:
     static constexpr double epsilon = 1e-9;
@@ -264,7 +268,8 @@ namespace muthechords {
     PerformanceSettings config{};
     ChordSnapshot harmony{}, pendingChord{};
     double origin = 0, searchPosition = 0, pendingBeat = 0, lastPhase = 0;
-    int outputChannel = 1, pendingChannel = 1, sampleCursor = 0, sourceAnchor = 0;
+    int outputChannel = 1, pendingChannel = 1, triggerVelocity = 100, pendingVelocity = 100,
+        sampleCursor = 0, sourceAnchor = 0;
     unsigned int liveCount = 0;
     bool active = false, pending = false, sourceMinor = false, positionConsumed = false;
     void *destination = nullptr;
@@ -353,7 +358,7 @@ namespace muthechords {
       }
     }
 
-    void changeHarmony(const ChordSnapshot &chord, int channel) {
+    void changeHarmony(const ChordSnapshot &chord, int channel, int velocity = 100) {
       if (config.transition != 2) {
         for (auto &n : notes) {
           if (n.used) {
@@ -373,10 +378,15 @@ namespace muthechords {
       }
       harmony = chord;
       outputChannel = channel;
+      triggerVelocity = std::clamp(velocity, 1, 127);
       pending = false;
     }
 
     static int floorDiv(int a, int b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
+
+    [[nodiscard]] int scaleVelocity(int eventVelocity) const {
+      return std::clamp((std::clamp(eventVelocity, 1, 127) * triggerVelocity + 50) / 100, 1, 127);
+    }
 
     void play(const PatternNote &e, double beat, double earliestOffBeat) {
       const int delta = std::clamp(e.note, 0, 127) - sourceAnchor;
@@ -387,6 +397,7 @@ namespace muthechords {
           origin + (std::floor(std::max(0.0, (beat - origin) * speed()) / regionLength()) + 1) *
                        regionLength() / speed();
       const double off = std::max(std::min(beat + e.duration / speed(), cycleEnd), earliestOffBeat);
+      const int velocity = scaleVelocity(e.velocity);
       const int sourceThird = sourceMinor ? 3 : 4;
       if (config.passing == 1 && pc != 0 && pc != sourceThird && pc != 7) {
         // Snap to the inferred source scale, then move within the destination
@@ -408,7 +419,7 @@ namespace muthechords {
         add(harmony.root + octave * 12 +
                 scale[static_cast<size_t>(destinationDegree % scale.size())] +
                 12 * (destinationDegree / scale.size()) - scale[static_cast<size_t>(start)],
-            e.velocity, off);
+            velocity, off);
         return;
       }
       // Deterministic rank heuristic, not a reconstruction of proprietary voice
@@ -426,7 +437,7 @@ namespace muthechords {
       int first = config.voices == 2 ? rank : rank * count / 3;
       int last = config.voices == 1 ? std::max(first + 1, (rank + 1) * count / 3) : first + 1;
       for (int i = first; i < last; ++i) {
-        add(harmony.notes[static_cast<size_t>(i % count)] + 12 * (octave + i / count), e.velocity,
+        add(harmony.notes[static_cast<size_t>(i % count)] + 12 * (octave + i / count), velocity,
             off);
       }
     }

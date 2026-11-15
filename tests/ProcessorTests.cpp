@@ -55,13 +55,26 @@ int main(int argc, char **argv) {
         }
       };
       collect(collect, *editor);
-      for (auto *child : components)
+      for (auto *child : components) {
         if (auto *combo = dynamic_cast<juce::ComboBox *>(child)) {
           auto &look = combo->getLookAndFeel();
           require(look.getPopupMenuFont() == look.getComboBoxFont(*combo),
                   "open menu uses the same font as its combo box");
+          require(std::abs(look.getComboBoxFont(*combo).getHeight() - 13.0f) < 1e-4f,
+                  "all combo boxes use 13pt font");
+          for (int i = 0; i < combo->getNumItems(); ++i)
+            require(juce::GlyphArrangement::getStringWidthInt(look.getComboBoxFont(*combo),
+                                                              combo->getItemText(i)) <=
+                        combo->getWidth() - 30,
+                    ("combo item fits without squishing: " + combo->getTitle() + " / " +
+                     combo->getItemText(i))
+                        .toRawUTF8());
         }
-      const std::array<std::pair<const char *, const char *>, 21> controls{
+        if (auto *label = dynamic_cast<juce::Label *>(child))
+          require(label->getMinimumHorizontalScale() == 1.0f,
+                  "labels never horizontally squish text");
+      }
+      const std::array<std::pair<const char *, const char *>, 23> controls{
           {{"Key", "root"},
            {"Scale", "scale"},
            {"Chord", "chord"},
@@ -71,6 +84,8 @@ int main(int argc, char **argv) {
            {"To", "high"},
            {"Mapping", "mapping"},
            {"Outside scale", "outside"},
+           {"Mode", "mode"},
+           {"Strum", "strum"},
            {"Pedal", "pedal"},
            {"Alt Chord", "alt"},
            {"Polarity", "polarity"},
@@ -124,11 +139,11 @@ int main(int argc, char **argv) {
       for (auto *child : components)
         if (auto *button = dynamic_cast<juce::Button *>(child)) {
           const auto text = button->getButtonText();
-          const char *id = text == "Sync"                              ? "harmonySync"
-                           : text == "Full range"                      ? "full"
-                           : text == "Latch"                           ? "latch"
-                           : text == "Chords" || text == "Performance" ? "mode"
-                                                                       : nullptr;
+          const char *id = text == "Sync"         ? "harmonySync"
+                           : text == "Full range" ? "full"
+                           : text == "Latch"      ? "latch"
+                           : text == "Bypass"     ? "bypass"
+                                                  : nullptr;
           if (id)
             require(editor->getControlParameterIndex(*button) ==
                         p.parameters.getParameter(id)->getParameterIndex(),
@@ -176,7 +191,7 @@ int main(int argc, char **argv) {
       const auto channel = juce::Uuid().toString().toStdString();
       ChordInstrumentProcessor original(channel);
       std::unique_ptr<juce::AudioProcessorEditor> editor(original.createEditor());
-      editor->setSize(950, 800);
+      editor->setSize(950, 900);
       for (int pass = 0; pass < 2; ++pass) {
         for (auto *base : original.getParameters())
           if (auto *parameter = dynamic_cast<juce::RangedAudioParameter *>(base)) {
@@ -219,15 +234,15 @@ int main(int argc, char **argv) {
         require(!loaded.performancePreview() && !loaded.performanceRunning(),
                 "playback remains stopped after restore");
         std::unique_ptr<juce::AudioProcessorEditor> reopened(loaded.createEditor());
-        require(reopened->getWidth() == 950 && reopened->getHeight() == 800,
+        require(reopened->getWidth() == 950 && reopened->getHeight() == 900,
                 "editor size restores with project");
-        reopened->setSize(760, 640);
+        reopened->setSize(760, 720);
         loaded.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
         for (int attempt = 0; attempt < 30 && reopened->getWidth() != 950; ++attempt) {
           juce::Thread::sleep(20);
           juce::Timer::callPendingTimersSynchronously();
         }
-        require(reopened->getWidth() == 950 && reopened->getHeight() == 800,
+        require(reopened->getWidth() == 950 && reopened->getHeight() == 900,
                 "state restore resizes an already open editor");
       }
     }
@@ -284,14 +299,42 @@ int main(int argc, char **argv) {
       set(reset, "chord", 3);
       set(reset, "transpose", 12);
       set(reset, "latch", 1);
+      set(reset, "strum", 2);
       set(reset, "perfVoices", 2);
       if (reset.patternList().size() > 3) set(reset, "perfPattern", 3);
       set(reset, "harmonySync", 1);
       set(peer, "harmonySync", 1);
+      midi.addEvent(juce::MidiMessage::pitchWheel(1, 4096), 0);
+      midi.addEvent(juce::MidiMessage::controllerEvent(1, 1, 77), 0);
       midi.addEvent(juce::MidiMessage::noteOn(1, 45, static_cast<juce::uint8>(90)), 0);
       reset.processBlock(audio, midi);
-      require(reset.hasSoundingOutput(), "reset test starts a sounding chord");
-      reset.resetToDefaults();
+      require(reset.hasSoundingOutput() && reset.inputPitchBend() == 4096 &&
+                  reset.inputModWheel() == 77,
+              "reset test starts a sounding chord and controller state");
+      std::unique_ptr<juce::AudioProcessorEditor> resetEditor(reset.createEditor());
+      juce::Button *octUp = nullptr, *resetButton = nullptr;
+      juce::Component *previewKeyboard = nullptr;
+      const auto findButtons = [&](auto &&self, juce::Component &parent) -> void {
+        for (auto *child : parent.getChildren()) {
+          if (child->getTitle().startsWith("Preview keyboard")) previewKeyboard = child;
+          if (auto *b = dynamic_cast<juce::Button *>(child)) {
+            if (b->getTitle() == "Keyboard octave up") octUp = b;
+            if (b->getButtonText() == "Reset") resetButton = b;
+          }
+          self(self, *child);
+        }
+      };
+      findButtons(findButtons, *resetEditor);
+      require(octUp && resetButton && previewKeyboard, "octave and reset buttons exist");
+      octUp->onClick();
+      require(previewKeyboard->getTitle() == "Preview keyboard C2 to B4",
+              "octave up shifts keyboard range");
+      resetButton->onClick();
+      require(previewKeyboard->getTitle() == "Preview keyboard C1 to B3",
+              "Reset restores default keyboard octave");
+      require(reset.inputPitchBend() == -1 && reset.inputModWheel() == -1 &&
+                  reset.inputNote() == -1,
+              "Reset clears controller and input indicators");
       for (auto *parameter : reset.getParameters())
         require(std::abs(parameter->getValue() - parameter->getDefaultValue()) < 1e-6f,
                 "reset restores every default parameter");
@@ -467,16 +510,57 @@ int main(int argc, char **argv) {
     midi.clear();
     restored.processBlock(audio, midi);
     require(midi.getNumEvents() == 4, "stop emits note-offs");
+    {
+      ChordInstrumentProcessor strum;
+      strum.prepareToPlay(48000, 512);
+      set(strum, "strum", 1);
+      midi.clear();
+      midi.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(90)), 10);
+      strum.processBlock(audio, midi);
+      std::vector<std::pair<int, int>> notesAndOffsets;
+      for (auto event : midi)
+        if (event.getMessage().isNoteOn())
+          notesAndOffsets.emplace_back(event.getMessage().getNoteNumber(), event.samplePosition);
+      require(notesAndOffsets.size() == 3 && notesAndOffsets[0].first == 36 &&
+                  notesAndOffsets[1].first == 40 && notesAndOffsets[2].first == 43 &&
+                  notesAndOffsets[0].second == 10 &&
+                  notesAndOffsets[1].second > notesAndOffsets[0].second &&
+                  notesAndOffsets[2].second > notesAndOffsets[1].second,
+              "Strum Up spreads chord attacks from low to high");
+      strum.requestStop();
+      midi.clear();
+      strum.processBlock(audio, midi);
+      set(strum, "strum", 3);
+      midi.clear();
+      midi.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(90)), 10);
+      strum.processBlock(audio, midi);
+      notesAndOffsets.clear();
+      for (auto event : midi)
+        if (event.getMessage().isNoteOn())
+          notesAndOffsets.emplace_back(event.getMessage().getNoteNumber(), event.samplePosition);
+      require(notesAndOffsets.size() == 3 && notesAndOffsets[0].first == 43 &&
+                  notesAndOffsets[0].second == 10 && notesAndOffsets[1].first == 40 &&
+                  notesAndOffsets[2].first == 36 &&
+                  notesAndOffsets[2].second > notesAndOffsets[1].second,
+              "Strum Down spreads chord attacks from high to low");
+      strum.releaseResources();
+    }
     if (argc > 1) {
       set(p, "mode", 0);
+      set(p, "strum", 0);
       set(p, "transpose", 0);
       set(p, "scale", 0);
       midi.clear();
       midi.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(90)), 0);
       p.processBlock(audio, midi);
       std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
-      auto image = editor->createComponentSnapshot(editor->getLocalBounds());
-      juce::FileOutputStream file(juce::File::getCurrentWorkingDirectory().getChildFile(argv[1]));
+      for (int i = 0; i < 5; ++i)
+        juce::Timer::callPendingTimersSynchronously();
+      editor->setScaleFactor(2.0f);
+      auto image = editor->createComponentSnapshot(editor->getLocalBounds(), true, 2.0f);
+      const auto destination = juce::File::getCurrentWorkingDirectory().getChildFile(argv[1]);
+      destination.deleteFile();
+      juce::FileOutputStream file(destination);
       require(file.openedOk(), "screenshot destination");
       juce::PNGImageFormat format;
       require(format.writeImageToStream(image, file), "editor screenshot");

@@ -139,4 +139,19 @@ TEST(PerformanceEngineTest, BassAndBlockSplittingEquivalence) {
       EXPECT_EQ(whole.output[i].event.note, split.output[i].event.note);
     }
   }
+  {
+    Fixture soft, loud;
+    soft.pattern.events = {{0, .5, 60, 100}};
+    loud.pattern = soft.pattern;
+    soft.configure();
+    loud.configure();
+    soft.engine.trigger(makeChord(), 1, 0, false, 0, 50);
+    loud.engine.trigger(makeChord(), 1, 0, false, 0, 120);
+    soft.advance(0, 1);
+    loud.advance(0, 1);
+    ASSERT_FALSE(soft.output.empty());
+    ASSERT_FALSE(loud.output.empty());
+    EXPECT_EQ(soft.output.front().event.velocity, 50);
+    EXPECT_EQ(loud.output.front().event.velocity, 120);
+  }
 }

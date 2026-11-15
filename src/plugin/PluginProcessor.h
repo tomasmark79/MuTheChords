@@ -129,6 +129,7 @@ private:
   int triggerNote = -1, triggerChannel = 1, lastPerformanceInput = -1;
   bool performanceKeyHeld = false;
   int eventOffset = 0;
+  int blockSamples = 512;
   int releasedForRestart = -1;
   juce::MidiBuffer output;
   std::atomic<bool> stopRequested{false};
