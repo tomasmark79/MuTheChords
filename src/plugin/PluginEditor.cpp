@@ -63,6 +63,21 @@ public:
   }
   juce::Font getComboBoxFont(juce::ComboBox &) override { return juce::FontOptions(13.0f); }
   juce::Font getPopupMenuFont() override { return juce::FontOptions(13.0f); }
+  void drawTooltip(juce::Graphics &g, const juce::String &text, int width, int height) override {
+    const auto bounds =
+        juce::Rectangle<float>(0, 0, static_cast<float>(width), static_cast<float>(height));
+    g.fillAll(panel.withAlpha(0.75f));
+    g.setColour(line);
+    g.drawRect(bounds.reduced(0.5f), 1.0f);
+
+    juce::AttributedString s;
+    s.setJustification(juce::Justification::centred);
+    s.append(text, juce::FontOptions(13.0f), muted);
+
+    juce::TextLayout tl;
+    tl.createLayout(s, bounds.getWidth() - 8.0f);
+    tl.draw(g, bounds.reduced(4.0f));
+  }
   void positionComboBoxText(juce::ComboBox &box, juce::Label &label) override {
     // Leave a dedicated arrow gutter; Label draws ellipses within the text
     // area without horizontally squishing glyphs.
@@ -673,6 +688,9 @@ MuTheChordsEditor::MuTheChordsEditor(MuTheChordsProcessor &p)
   resetDefaults.onClick = [this] {
     keyboard->resetOctave();
     displayedPattern = -1;
+    chordHistory.clear();
+    chordTrail.setText({}, juce::dontSendNotification);
+    chordTrail.setTooltip({});
     processor.resetToDefaults();
     timerCallback();
   };
