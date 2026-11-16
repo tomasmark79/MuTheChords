@@ -1,0 +1,117 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-native:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v21
+        with:
+          flakehub: false
+
+      - name: Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v13
+
+      - name: Build native (linux-x86_64)
+        run: nix develop ./nix --command make build
+
+      - name: Package native artifacts
+        run: |
+          mkdir -p release-artifacts
+          tar -czf release-artifacts/MuTheChords-linux-x86_64.tar.gz -C build/native/release .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MuTheChords-linux-x86_64
+          path: release-artifacts/MuTheChords-linux-x86_64.tar.gz
+
+  build-cross:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [aarch64, windows]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v21
+        with:
+          flakehub: false
+
+      - name: Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v13
+
+      - name: Cross build (${{ matrix.arch }})
+        run: nix develop ./nix#${{ matrix.arch }} --command make cross-${{ matrix.arch }}
+
+      - name: Package cross artifacts (${{ matrix.arch }})
+        run: |
+          mkdir -p release-artifacts
+          if [ "${{ matrix.arch }}" = "windows" ]; then
+            (cd build/windows/release && zip -r ../../../release-artifacts/MuTheChords-windows-x86_64.zip .)
+          else
+            tar -czf release-artifacts/MuTheChords-linux-aarch64.tar.gz -C build/aarch64/release .
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MuTheChords-${{ matrix.arch }}
+          path: release-artifacts/*
+
+  release:
+    needs: [build-native, build-cross]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            LATEST=$(git tag -l "v[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | head -n1)
+            if [ -z "$LATEST" ]; then
+              TAG="v0.0.1"
+            else
+              IFS='.' read -r MAJOR MINOR PATCH <<< "${LATEST#v}"
+              TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+            fi
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          make_latest: true
+          files: release-artifacts/*
