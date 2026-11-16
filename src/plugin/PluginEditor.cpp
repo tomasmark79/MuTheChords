@@ -125,8 +125,8 @@ public:
     g.drawFittedText(button.getButtonText(), button.getLocalBounds().reduced(6, 1),
                      juce::Justification::centred, 1, 1.0f);
   }
-  void drawToggleButton(juce::Graphics &g, juce::ToggleButton &button, bool shouldDrawButtonAsHighlighted,
-                        bool shouldDrawButtonAsDown) override {
+  void drawToggleButton(juce::Graphics &g, juce::ToggleButton &button,
+                        bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override {
     const float fontSize = 13.0f;
     const float tickWidth = fontSize * 1.1f;
     drawTickBox(g, button, 4.0f, (static_cast<float>(button.getHeight()) - tickWidth) * 0.5f,
@@ -188,14 +188,12 @@ public:
         const auto rect = bounds.reduced(1.0f);
         g.setColour(fill);
         g.fillRoundedRectangle(rect, 3.0f);
-        const juce::Colour outline =
-            input && !invalid ? juce::Colour(0xffb8666d)
-            : sounding        ? juce::Colour(0xffdff6d8)
-            : activeKey       ? (inRange ? accent : juce::Colour(0xff93b3cf))
-                              : line.withAlpha(0.32f);
+        const juce::Colour outline = input && !invalid ? juce::Colour(0xffb8666d)
+                                     : sounding        ? juce::Colour(0xffdff6d8)
+                                     : activeKey ? (inRange ? accent : juce::Colour(0xff93b3cf))
+                                                 : line.withAlpha(0.32f);
         g.setColour(outline);
-        g.drawRoundedRectangle(rect, 3.0f,
-                               (activeKey || sounding || input) ? 1.6f : 1.0f);
+        g.drawRoundedRectangle(rect, 3.0f, (activeKey || sounding || input) ? 1.6f : 1.0f);
         if (invalid) {
           g.setColour(juce::Colours::white);
           g.setFont(juce::FontOptions(13.0f));
@@ -203,8 +201,8 @@ public:
         }
         if (!black) {
           g.setColour(sounding || (input && !invalid) ? juce::Colour(0xff172b43)
-                      : activeKey                     ? (inRange ? accent : foreground.withAlpha(0.85f))
-                                                      : muted.withAlpha(0.35f));
+                      : activeKey ? (inRange ? accent : foreground.withAlpha(0.85f))
+                                  : muted.withAlpha(0.35f));
           g.setFont(juce::FontOptions(9.0f));
           g.drawText(noteName(note), bounds.withY(bounds.getBottom() - 17.0f).withHeight(14.0f),
                      juce::Justification::centred);
@@ -353,8 +351,8 @@ public:
     g.drawText(noteName(limits.second), 3, 16, 34, 12, juce::Justification::left);
     g.drawText(noteName(limits.first), 3, getHeight() - 17, 34, 12, juce::Justification::left);
     for (const auto &event : source->events) {
-      g.setColour(accent.withAlpha(
-          (0.3f + 0.7f * juce::jlimit(0, 127, event.velocity) / 127.0f) * alpha));
+      g.setColour(
+          accent.withAlpha((0.3f + 0.7f * juce::jlimit(0, 127, event.velocity) / 127.0f) * alpha));
       g.fillRoundedRectangle(noteBounds(event), 1.5f);
     }
     if (owner.processor.performanceRunning()) {
@@ -1045,11 +1043,13 @@ void MuTheChordsEditor::timerCallback() {
           juce::String::fromUTF8(muthechords::chordName(currentChord, notation).c_str());
       title = chordSymbol + (solo ? " + solo" : "");
       if (chordSymbol.isNotEmpty() &&
-          (chordHistory.isEmpty() || chordHistory.getReference(chordHistory.size() - 1) != chordSymbol)) {
+          (chordHistory.isEmpty() ||
+           chordHistory.getReference(chordHistory.size() - 1) != chordSymbol)) {
         chordHistory.add(chordSymbol);
         while (chordHistory.size() > 8)
           chordHistory.remove(0);
-        const auto trailText = chordHistory.joinIntoString(juce::String::fromUTF8(" \xe2\x86\x92 "));
+        const auto trailText =
+            chordHistory.joinIntoString(juce::String::fromUTF8(" \xe2\x86\x92 "));
         chordTrail.setText(trailText, juce::dontSendNotification);
         chordTrail.setTooltip(trailText);
       }
@@ -1098,8 +1098,8 @@ void MuTheChordsEditor::setCompactMode(bool compact) {
 void MuTheChordsEditor::paint(juce::Graphics &g) {
   g.fillAll(background);
   const float logicalHeight = compactMode ? 76.0f : 720.0f;
-  const float zoom =
-      std::min(static_cast<float>(getWidth()) / 760.0f, static_cast<float>(getHeight()) / logicalHeight);
+  const float zoom = std::min(static_cast<float>(getWidth()) / 760.0f,
+                              static_cast<float>(getHeight()) / logicalHeight);
   g.addTransform(juce::AffineTransform::scale(zoom).translated(
       (getWidth() - 760.0f * zoom) * 0.5f, (getHeight() - logicalHeight * zoom) * 0.5f));
   if (compactMode) {
@@ -1155,8 +1155,8 @@ void MuTheChordsEditor::resized() {
   // Keep one logical coordinate system. JUCE applies the host's DPI transform
   // to the whole editor independently of this user-controlled size adjustment.
   const float logicalHeight = compactMode ? 76.0f : 720.0f;
-  const float zoom =
-      std::min(static_cast<float>(getWidth()) / 760.0f, static_cast<float>(getHeight()) / logicalHeight);
+  const float zoom = std::min(static_cast<float>(getWidth()) / 760.0f,
+                              static_cast<float>(getHeight()) / logicalHeight);
   content.setBounds(0, 0, 760, static_cast<int>(logicalHeight));
   content.setTransform(juce::AffineTransform::scale(zoom).translated(
       (getWidth() - 760.0f * zoom) * 0.5f, (getHeight() - logicalHeight * zoom) * 0.5f));
