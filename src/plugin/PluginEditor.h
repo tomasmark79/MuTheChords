@@ -8,6 +8,7 @@ public:
   ~MuTheChordsEditor() override;
   void paint(juce::Graphics &) override;
   void resized() override;
+  void setCompactMode(bool compact);
   int getControlParameterIndex(juce::Component &) override;
 
 private:
@@ -42,7 +43,10 @@ private:
   juce::Label rootLabel, scaleLabel, chordLabel, inversionLabel, transposeLabel;
   juce::Label lowLabel, highLabel, mappingLabel, outsideLabel, modeLabel, strumLabel, pedalLabel,
       altLabel, polarityLabel;
-  juce::Label outputTitle, outputNotes, patternSummary;
+  juce::TextButton compactButton{"Mini"};
+  bool compactMode = false;
+  juce::Label outputTitle, outputNotes, chordTrail, patternSummary;
+  juce::StringArray chordHistory;
   juce::Label loopInfo;
   HoverComboBox category, pattern, rate, division, voices, passing, change, transition, playback;
   juce::Label categoryLabel, patternLabel, rateLabel, divisionLabel, voicesLabel, passingLabel,

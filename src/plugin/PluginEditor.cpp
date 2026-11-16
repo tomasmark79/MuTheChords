@@ -760,7 +760,10 @@ MuTheChordsEditor::MuTheChordsEditor(MuTheChordsProcessor &p)
   };
   patternGraph = std::make_unique<PatternGraph>(*this);
   content.addAndMakeVisible(*patternGraph);
-  for (auto *label : {&outputTitle, &outputNotes, &patternSummary}) {
+  content.addAndMakeVisible(compactButton);
+  compactButton.setTooltip("Toggle compact output-only view");
+  compactButton.onClick = [this] { setCompactMode(!compactMode); };
+  for (auto *label : {&outputTitle, &outputNotes, &chordTrail, &patternSummary}) {
     content.addAndMakeVisible(label);
     label->setBorderSize(juce::BorderSize<int>(0));
     label->setJustificationType(juce::Justification::centred);
@@ -769,8 +772,10 @@ MuTheChordsEditor::MuTheChordsEditor(MuTheChordsProcessor &p)
   }
   outputTitle.setFont(juce::FontOptions(19.0f));
   outputNotes.setFont(juce::FontOptions(13.0f));
+  chordTrail.setFont(juce::FontOptions(11.5f));
   outputTitle.setMinimumHorizontalScale(1.0f);
   outputNotes.setColour(juce::Label::textColourId, accent);
+  chordTrail.setColour(juce::Label::textColourId, foreground.withAlpha(0.65f));
   patternSummary.setFont(juce::FontOptions(11.0f));
   patternSummary.setJustificationType(juce::Justification::centredLeft);
   patternSummary.setColour(juce::Label::textColourId, muted);
@@ -1002,8 +1007,7 @@ void MuTheChordsEditor::timerCallback() {
   const int input = processor.inputNote();
   juce::String title = "Ready to play";
   if (!sounding.isEmpty())
-    title = juce::String(performanceMode ? "Performance" : "Playing") + " / " +
-            juce::String(sounding.size()) + (sounding.size() == 1 ? " note" : " notes");
+    title = "";
   else if (performanceMode)
     title = processor.patternList().empty() ? "No patterns available" : "Ready for pattern";
   else if (input >= 0 && processor.inputOutside())
@@ -1018,10 +1022,20 @@ void MuTheChordsEditor::timerCallback() {
           std::find(currentChord.notes.begin(), currentChord.notes.begin() + currentChord.count,
                     n) == currentChord.notes.begin() + currentChord.count)
         solo = true;
-    if (complete)
-      title += " / " +
-               juce::String::fromUTF8(muthechords::chordName(currentChord, notation).c_str()) +
-               (solo ? " + solo" : "");
+    if (complete) {
+      const auto chordSymbol =
+          juce::String::fromUTF8(muthechords::chordName(currentChord, notation).c_str());
+      title = chordSymbol + (solo ? " + solo" : "");
+      if (chordSymbol.isNotEmpty() &&
+          (chordHistory.isEmpty() || chordHistory.getReference(chordHistory.size() - 1) != chordSymbol)) {
+        chordHistory.add(chordSymbol);
+        while (chordHistory.size() > 8)
+          chordHistory.remove(0);
+        const auto trailText = chordHistory.joinIntoString(juce::String::fromUTF8(" \xe2\x86\x92 "));
+        chordTrail.setText(trailText, juce::dontSendNotification);
+        chordTrail.setTooltip(trailText);
+      }
+    }
   }
   for (auto *box :
        {&root, &scale, &chord, &low, &high, &outside, &mode, &strum, &pedal, &alt, &polarity})
@@ -1045,12 +1059,35 @@ void MuTheChordsEditor::timerCallback() {
   keyboard->repaint();
   repaint();
 }
+void MuTheChordsEditor::setCompactMode(bool compact) {
+  compactMode = compact;
+  compactButton.setButtonText(compactMode ? "Full" : "Mini");
+  for (auto *child : content.getChildren())
+    child->setVisible(!compactMode || child == &outputTitle || child == &outputNotes ||
+                      child == &chordTrail || child == &compactButton);
+  const double logicalHeight = compactMode ? 76.0 : 720.0;
+  const int currentWidth = std::max(570, getWidth());
+  getConstrainer()->setFixedAspectRatio(760.0 / logicalHeight);
+  if (compactMode)
+    setResizeLimits(570, 57, 1140, 114);
+  else
+    setResizeLimits(570, 540, 1140, 1080);
+  setSize(currentWidth, juce::roundToInt(currentWidth * logicalHeight / 760.0));
+  resized();
+  repaint();
+}
+
 void MuTheChordsEditor::paint(juce::Graphics &g) {
   g.fillAll(background);
+  const float logicalHeight = compactMode ? 76.0f : 720.0f;
   const float zoom =
-      std::min(static_cast<float>(getWidth()) / 760.0f, static_cast<float>(getHeight()) / 720.0f);
+      std::min(static_cast<float>(getWidth()) / 760.0f, static_cast<float>(getHeight()) / logicalHeight);
   g.addTransform(juce::AffineTransform::scale(zoom).translated(
-      (getWidth() - 760.0f * zoom) * 0.5f, (getHeight() - 720.0f * zoom) * 0.5f));
+      (getWidth() - 760.0f * zoom) * 0.5f, (getHeight() - logicalHeight * zoom) * 0.5f));
+  if (compactMode) {
+    drawGroup(g, {16, 6, 728, 64}, "Output", juce::Colour(0xff294b69));
+    return;
+  }
   const juce::Font titleFont(juce::FontOptions(18.0f, juce::Font::bold));
   g.setColour(foreground);
   g.setFont(titleFont);
@@ -1069,7 +1106,7 @@ void MuTheChordsEditor::paint(juce::Graphics &g) {
   drawGroup(g, {16, 213, 728, 70}, "Play");
   drawGroup(g, {16, 297, 728, 160}, "Pattern");
   drawGroup(g, {16, 471, 728, 105}, "Performance");
-  drawGroup(g, {16, 588, 728, 48}, "Output", juce::Colour(0xff294b69));
+  drawGroup(g, {16, 588, 728, 60}, "Output", juce::Colour(0xff294b69));
   g.setFont(juce::FontOptions(10.0f));
   g.setColour(muted);
   const auto wheel = [&](float x, const char *name, int value, int maximum) {
@@ -1099,11 +1136,19 @@ void MuTheChordsEditor::resized() {
   if (getWidth() >= 570) processor.rememberEditorWidth(getWidth());
   // Keep one logical coordinate system. JUCE applies the host's DPI transform
   // to the whole editor independently of this user-controlled size adjustment.
+  const float logicalHeight = compactMode ? 76.0f : 720.0f;
   const float zoom =
-      std::min(static_cast<float>(getWidth()) / 760.0f, static_cast<float>(getHeight()) / 720.0f);
-  content.setBounds(0, 0, 760, 720);
+      std::min(static_cast<float>(getWidth()) / 760.0f, static_cast<float>(getHeight()) / logicalHeight);
+  content.setBounds(0, 0, 760, static_cast<int>(logicalHeight));
   content.setTransform(juce::AffineTransform::scale(zoom).translated(
-      (getWidth() - 760.0f * zoom) * 0.5f, (getHeight() - 720.0f * zoom) * 0.5f));
+      (getWidth() - 760.0f * zoom) * 0.5f, (getHeight() - logicalHeight * zoom) * 0.5f));
+  if (compactMode) {
+    compactButton.setBounds(29, 14, 64, 24);
+    outputTitle.setBounds(118, 10, 524, 22);
+    outputNotes.setBounds(118, 33, 524, 16);
+    chordTrail.setBounds(29, 52, 702, 15);
+    return;
+  }
   auto field = [](juce::ComboBox &box, juce::Label &label, int x, int y, int width) {
     label.setBounds(x, y, width, 14);
     box.setBounds(x, y + 16, width, 28);
@@ -1147,8 +1192,10 @@ void MuTheChordsEditor::resized() {
   field(change, changeLabel, 29, 525, 226);
   field(transition, transitionLabel, 267, 525, 226);
   field(playback, playbackLabel, 505, 525, 226);
-  outputTitle.setBounds(118, 596, 524, 22);
-  outputNotes.setBounds(118, 618, 524, 16);
+  compactButton.setBounds(29, 598, 64, 28);
+  outputTitle.setBounds(118, 593, 524, 20);
+  outputNotes.setBounds(118, 613, 524, 15);
+  chordTrail.setBounds(29, 630, 702, 15);
   spelling.setBounds(644, 598, 87, 28);
   keyboardUp.setBounds(66, 662, 22, 21);
   keyboardDown.setBounds(66, 686, 22, 21);
