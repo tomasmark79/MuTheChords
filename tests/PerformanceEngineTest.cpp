@@ -155,3 +155,29 @@ TEST(PerformanceEngineTest, BassAndBlockSplittingEquivalence) {
     EXPECT_EQ(loud.output.front().event.velocity, 120);
   }
 }
+
+TEST(PerformanceEngineTest, FractionalLoopPreservesEventOrderAndSkipsEventsOutsideRegion) {
+  for (bool prepared : {false, true}) {
+    Fixture f;
+    f.pattern.length = 4.375;
+    f.pattern.events = {
+        {4.25, .125, 67, 90}, {4, .125, 64, 80}, {3.5, .25, 60, 127}, {4, .25, 60, 70}};
+    if (prepared) {
+      f.pattern.playback = f.pattern.preparePlayback();
+    }
+    f.settings.loopStart = 1;
+    f.settings.playback = 2;
+    f.configure();
+    f.engine.trigger(makeChord(), 1, 0, false);
+    f.engine.advance(0, 1.0 / 16, 0, 13);
+    std::vector<std::pair<int, int>> attacks;
+    for (const auto &message : f.output) {
+      if (message.event.on) {
+        attacks.emplace_back(message.sample, message.event.note);
+      }
+    }
+    EXPECT_EQ(attacks,
+              (std::vector<std::pair<int, int>>{
+                  {0, 65}, {0, 62}, {4, 69}, {6, 65}, {6, 62}, {10, 69}, {12, 65}, {12, 62}}));
+  }
+}

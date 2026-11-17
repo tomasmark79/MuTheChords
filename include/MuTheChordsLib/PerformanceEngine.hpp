@@ -8,9 +8,10 @@
 
 namespace muthechords {
 
-  // Allocation-free playback. Pattern storage must remain valid until
-  // configure(nullptr, ...). Host positions are quarter-note PPQ; startBeat is
-  // the beat at sample zero.
+  // Playback is allocation-free for patterns prepared by PatternLibrary.
+  // Prepare standalone patterns before calling configure on the audio thread.
+  // Pattern storage must remain valid until another pattern is configured.
+  // Host positions are quarter-note PPQ; startBeat is the beat at sample zero.
   class PerformanceEngine {
   public:
     using Callback = void (*)(void *, Event, int);
@@ -33,54 +34,32 @@ namespace muthechords {
       settings.playback = std::clamp(settings.playback, 0, 2);
       settings.loopStart = std::max(0, settings.loopStart);
       settings.loopEnd = std::max(0, settings.loopEnd);
-      if (next != pattern || settings.rate != config.rate || settings.division != config.division ||
-          settings.voices != config.voices || settings.passing != config.passing ||
-          settings.change != config.change || settings.transition != config.transition ||
-          settings.playback != config.playback || settings.loopStart != config.loopStart ||
-          settings.loopEnd != config.loopEnd) {
-        stop();
+      if (next == pattern && settings.rate == config.rate && settings.division == config.division &&
+          settings.voices == config.voices && settings.passing == config.passing &&
+          settings.change == config.change && settings.transition == config.transition &&
+          settings.playback == config.playback && settings.loopStart == config.loopStart &&
+          settings.loopEnd == config.loopEnd) {
+        return;
       }
-      if (next != pattern) {
-        sourceAnchor = next ? next->sourceRoot : 0;
-        // Bass phrases may begin on a chord tone other than the estimated
-        // tonal centre. Anchor their first sounding note to the input root.
-        if (next && next->category == "Bass") {
-          double earliest = std::numeric_limits<double>::infinity();
-          for (const auto &e : next->events) {
-            if (std::isfinite(e.beat) && std::isfinite(e.duration) && e.beat >= 0 &&
-                e.beat < next->length && e.duration > 0 && e.note >= 0 && e.note <= 127) {
-              if (e.beat < earliest) {
-                earliest = e.beat;
-                sourceAnchor = e.note;
-              } else if (e.beat == earliest) {
-                sourceAnchor = std::min(sourceAnchor, e.note);
-              }
-            }
-          }
-        }
-        // Source files carry a root but no scale: infer a minor reference when
-        // its duration-weighted minor-third evidence exceeds major-third
-        // evidence.
-        double minorWeight = 0, majorWeight = 0;
-        if (next) {
-          for (const auto &e : next->events) {
-            if (!std::isfinite(e.duration) || e.duration <= 0) {
-              continue;
-            }
-            const int pc = ((e.note - sourceAnchor) % 12 + 12) % 12;
-            const double weight = e.duration * std::clamp(e.velocity, 1, 127);
-            if (pc == 3) {
-              minorWeight += weight;
-            }
-            if (pc == 4) {
-              majorWeight += weight;
-            }
-          }
-        }
-        sourceMinor = minorWeight > majorWeight;
+      if (next != pattern && next && !next->playback) {
+        fallbackPlayback = next->preparePlayback();
       }
+      stop();
       pattern = next;
       config = settings;
+      if (usable()) {
+        const double start = regionStart(), end = regionEnd();
+        loopStartBeat = start;
+        loopLength = std::max(epsilon, end - start);
+        const auto &order = playback().eventOrder;
+        const auto beforeBeat = [&](size_t i, double beat) {
+          return pattern->events[i].beat < beat;
+        };
+        const auto first = std::lower_bound(order.begin(), order.end(), start, beforeBeat);
+        firstEvent = static_cast<size_t>(first - order.begin());
+        endEvent = static_cast<size_t>(std::lower_bound(first, order.end(), end, beforeBeat) -
+                                       order.begin());
+      }
     }
 
     void trigger(ChordSnapshot chord, int channel, double hostBeat, bool quantize,
@@ -97,8 +76,8 @@ namespace muthechords {
         triggerVelocity = inputVelocity;
         active = true;
         origin = quantize ? nextQuarter(hostBeat, boundaryTolerance) : hostBeat;
-        searchPosition = 0;
-        positionConsumed = false;
+        nextEvent = firstEvent;
+        loopCycle = 0;
       } else if (config.change == 2) {
         pendingChord = chord;
         pendingChannel = channel;
@@ -109,8 +88,8 @@ namespace muthechords {
         changeHarmony(chord, channel, inputVelocity);
         if (config.change == 1) {
           origin = hostBeat;
-          searchPosition = 0;
-          positionConsumed = false;
+          nextEvent = firstEvent;
+          loopCycle = 0;
         }
       }
     }
@@ -133,8 +112,6 @@ namespace muthechords {
         active = false;
         pending = false;
         harmony = {};
-        searchPosition = 0;
-        positionConsumed = false;
         lastPhase = 0;
       }
     }
@@ -148,8 +125,6 @@ namespace muthechords {
       active = false;
       pending = false;
       harmony = {};
-      searchPosition = 0;
-      positionConsumed = false;
       lastPhase = 0;
     }
 
@@ -163,11 +138,8 @@ namespace muthechords {
       }
       const double endBeat = startBeat + toSample * beatsPerSample;
       while (active || liveCount > 0) {
-        const double eventPosition =
-            active ? nextPosition() : std::numeric_limits<double>::infinity();
-        const double eventBeat = origin + eventPosition / speed();
-        double next = eventBeat;
-        const double finish = origin + regionLength() / speed();
+        double next = active ? nextBeat() : std::numeric_limits<double>::infinity();
+        const double finish = origin + loopLength / speed();
         if (active && config.playback == 1) {
           next = std::min(next, finish);
         }
@@ -210,25 +182,25 @@ namespace muthechords {
         // Usually one position; handles several events rounding to the same
         // sample.
         for (; active;) {
-          const double position = nextPosition();
-          const double beat = origin + position / speed();
+          const double beat = nextBeat();
           if (!std::isfinite(beat) || beat > now + epsilon) {
             break;
           }
-          for (const auto &e : pattern->events) {
-            if (validEvent(e) &&
-                std::abs(regionStart() + std::fmod(position, regionLength()) - e.beat) < epsilon) {
-              play(e, beat, now + beatsPerSample);
-            }
+          if (liveCount < notes.size()) {
+            const double cycleEnd = origin + (loopCycle + 1) * loopLength / speed();
+            play(pattern->events[playback().eventOrder[nextEvent]], beat, cycleEnd,
+                 now + beatsPerSample);
           }
-          searchPosition = position;
-          positionConsumed = true;
+          if (++nextEvent == endEvent) {
+            nextEvent = firstEvent;
+            ++loopCycle;
+          }
         }
       }
       sampleCursor = std::max(0, toSample);
       if (active && usable()) {
         const double p = std::max(0.0, (endBeat - origin) * speed());
-        lastPhase = (regionStart() + std::fmod(p, regionLength())) / pattern->length;
+        lastPhase = (loopStartBeat + std::fmod(p, loopLength)) / pattern->length;
       }
     }
 
@@ -265,13 +237,15 @@ namespace muthechords {
     std::array<ActiveNote, 2048> notes{};
     std::array<std::array<unsigned int, 128>, 16> owners{};
     const Pattern *pattern = nullptr;
+    PatternPlayback fallbackPlayback;
     PerformanceSettings config{};
     ChordSnapshot harmony{}, pendingChord{};
-    double origin = 0, searchPosition = 0, pendingBeat = 0, lastPhase = 0;
+    double origin = 0, loopStartBeat = 0, loopLength = 1, pendingBeat = 0, lastPhase = 0;
+    size_t firstEvent = 0, endEvent = 0, nextEvent = 0, loopCycle = 0;
     int outputChannel = 1, pendingChannel = 1, triggerVelocity = 100, pendingVelocity = 100,
-        sampleCursor = 0, sourceAnchor = 0;
+        sampleCursor = 0;
     unsigned int liveCount = 0;
-    bool active = false, pending = false, sourceMinor = false, positionConsumed = false;
+    bool active = false, pending = false;
     void *destination = nullptr;
     Callback callback = nullptr;
 
@@ -294,10 +268,6 @@ namespace muthechords {
       return config.loopEnd > 0 && end > regionStart() ? end : pattern->length;
     }
 
-    [[nodiscard]] double regionLength() const {
-      return std::max(epsilon, regionEnd() - regionStart());
-    }
-
     static double nextQuarter(double beat, double tolerance = 0) {
       // Grid MIDI events round to whole samples. Do not postpone a beat by a
       // full quarter when its input timestamp is at most one sample late.
@@ -306,25 +276,16 @@ namespace muthechords {
       return std::abs(beat - nearest) <= window + epsilon ? nearest : std::ceil(beat - epsilon);
     }
 
-    [[nodiscard]] bool validEvent(const PatternNote &e) const {
-      return std::isfinite(e.beat) && std::isfinite(e.duration) && e.beat >= 0 &&
-             e.beat < pattern->length && e.duration > 0;
+    [[nodiscard]] const PatternPlayback &playback() const {
+      return pattern->playback ? *pattern->playback : fallbackPlayback;
     }
 
-    [[nodiscard]] double nextPosition() const {
-      double next = std::numeric_limits<double>::infinity();
-      const double length = regionLength(), start = regionStart();
-      const double cycle = std::floor(searchPosition / length);
-      for (const auto &e : pattern->events) {
-        if (validEvent(e) && e.beat >= start && e.beat < regionEnd()) {
-          double candidate = cycle * length + e.beat - start;
-          if (candidate < searchPosition || (positionConsumed && candidate == searchPosition)) {
-            candidate += length;
-          }
-          next = std::min(next, candidate);
-        }
+    [[nodiscard]] double nextBeat() const {
+      if (firstEvent == endEvent) {
+        return std::numeric_limits<double>::infinity();
       }
-      return next;
+      const auto &event = pattern->events[playback().eventOrder[nextEvent]];
+      return origin + (loopCycle * loopLength + (event.beat - loopStartBeat)) / speed();
     }
 
     void emit(bool on, int channel, int note, int velocity) {
@@ -343,7 +304,7 @@ namespace muthechords {
     }
 
     void add(int note, int velocity, double offBeat) {
-      if (note < 0 || note > 127) {
+      if (note < 0 || note > 127 || liveCount == notes.size()) {
         return;
       }
       for (auto &n : notes) {
@@ -388,23 +349,21 @@ namespace muthechords {
       return std::clamp((std::clamp(eventVelocity, 1, 127) * triggerVelocity + 50) / 100, 1, 127);
     }
 
-    void play(const PatternNote &e, double beat, double earliestOffBeat) {
-      const int delta = std::clamp(e.note, 0, 127) - sourceAnchor;
+    void play(const PatternNote &e, double beat, double cycleEnd, double earliestOffBeat) {
+      const auto &source = playback();
+      const int delta = std::clamp(e.note, 0, 127) - source.sourceAnchor;
       const int octave = floorDiv(delta, 12), pc = delta - octave * 12;
       // A sub-sample duration must still produce a terminating note-off after its
       // note-on.
-      const double cycleEnd =
-          origin + (std::floor(std::max(0.0, (beat - origin) * speed()) / regionLength()) + 1) *
-                       regionLength() / speed();
       const double off = std::max(std::min(beat + e.duration / speed(), cycleEnd), earliestOffBeat);
       const int velocity = scaleVelocity(e.velocity);
-      const int sourceThird = sourceMinor ? 3 : 4;
+      const int sourceThird = source.sourceMinor ? 3 : 4;
       if (config.passing == 1 && pc != 0 && pc != sourceThird && pc != 7) {
         // Snap to the inferred source scale, then move within the destination
         // scale.
         constexpr std::array<int, 7> major{0, 2, 4, 5, 7, 9, 11};
         constexpr std::array<int, 7> minor{0, 2, 3, 5, 7, 8, 10};
-        const auto &sourceScale = sourceMinor ? minor : major;
+        const auto &sourceScale = source.sourceMinor ? minor : major;
         int degree = 0;
         for (int i = 1; i < 7; ++i) {
           if (std::abs(sourceScale[static_cast<size_t>(i)] - pc) <

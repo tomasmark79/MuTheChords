@@ -229,6 +229,7 @@ namespace muthechords {
           }
           pattern.events.push_back(note);
         }
+        pattern.playback = pattern.preparePlayback();
         loaded.push_back(std::move(pattern));
       }
       data = std::move(loaded);
