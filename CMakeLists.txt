@@ -39,6 +39,10 @@ if(MUTHECHORDS_BUILD_PLUGIN)
   include(cmake/Vst3MidiMonitor.cmake)
   add_subdirectory(third_party/clap-juce-extensions EXCLUDE_FROM_ALL)
 
+  if(MSVC)
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/utf-8>")
+  endif()
+
   set(MUTHECHORDS_AUTO_MANIFEST TRUE)
   if(CMAKE_CROSSCOMPILING)
     set(MUTHECHORDS_AUTO_MANIFEST FALSE)
