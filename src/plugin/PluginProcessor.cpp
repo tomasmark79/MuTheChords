@@ -311,6 +311,22 @@ void MuTheChordsProcessor::requestPerformancePreview(bool enabled) {
   // tick.
   performancePreviewRequest.store(enabled ? 1 : 0);
 }
+bool MuTheChordsProcessor::readDisplaySnapshot(DisplayFrame &frame) {
+  DisplayUpdate update;
+  const bool received = chordDisplay.read(update);
+  const auto generation = displayResetGeneration.load();
+  const bool reset = generation != lastReadDisplayResetGeneration;
+  lastReadDisplayResetGeneration = generation;
+  if (received && update.resetGeneration == generation) {
+    frame = update.frame;
+    return true;
+  }
+  if (reset) {
+    frame = {};
+    return true;
+  }
+  return false;
+}
 void MuTheChordsProcessor::resetToDefaults() {
   // This runs on the message thread. Leave the group before changing Key/Scale.
   restoring.store(true);
@@ -336,9 +352,10 @@ void MuTheChordsProcessor::resetToDefaults() {
   lastModWheel.store(-1);
   lastInput.store(-1);
   lastOutside.store(false);
-  chordDisplay.publish({});
   resetPerformanceInput.store(true);
   stateRestored.store(true);
+  // Invalidate pending display updates without writing to the audio mailbox.
+  displayResetGeneration.fetch_add(1);
   restoring.store(false);
   updateHostDisplay();
 }
@@ -356,7 +373,7 @@ void MuTheChordsProcessor::prepareToPlay(double rate, int) {
   for (auto &n : sounding)
     n.store(false);
   lastInput.store(-1);
-  chordDisplay.publish({});
+  chordDisplay.publish({{}, displayResetGeneration.load()});
 }
 void MuTheChordsProcessor::releaseResources() {
   engine.setOutput(nullptr, nullptr);
@@ -365,7 +382,7 @@ void MuTheChordsProcessor::releaseResources() {
   for (auto &n : sounding)
     n.store(false);
   lastInput.store(-1);
-  chordDisplay.publish({});
+  chordDisplay.publish({{}, displayResetGeneration.load()});
 }
 bool MuTheChordsProcessor::isBusesLayoutSupported(const BusesLayout &layout) const {
   return layout.getMainOutputChannelSet() == juce::AudioChannelSet::stereo() ||
@@ -582,6 +599,7 @@ void MuTheChordsProcessor::processBlock(juce::AudioBuffer<float> &audio, juce::M
     processBlockBypassed(audio, midi);
     return;
   }
+  const auto displayGeneration = displayResetGeneration.load();
   juce::ScopedNoDenormals noDenormals;
   audio.clear();
   output.clear();
@@ -782,7 +800,7 @@ void MuTheChordsProcessor::processBlock(juce::AudioBuffer<float> &audio, juce::M
     sounding[static_cast<size_t>(n)].store(on, std::memory_order_relaxed);
   }
   anyOutput.store(any);
-  chordDisplay.publish(display);
+  chordDisplay.publish({display, displayGeneration});
   engine.setOutput(nullptr, nullptr);
   performance.setOutput(nullptr, nullptr);
   midi.clear();
@@ -824,7 +842,7 @@ void MuTheChordsProcessor::processBlockBypassed(juce::AudioBuffer<float> &audio,
   lastInput.store(-1);
   for (auto &n : sounding)
     n.store(false);
-  chordDisplay.publish({});
+  chordDisplay.publish({{}, displayResetGeneration.load()});
   output.addEvents(midi, 0, -1, 0);
   midi.swapWith(output);
   monitorOutput(midi);

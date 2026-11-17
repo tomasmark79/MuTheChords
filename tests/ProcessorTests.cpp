@@ -1,7 +1,9 @@
 #include "PluginProcessor.h"
 #include <MuTheChordsLib/NoteNames.hpp>
 #include <iostream>
+#include <semaphore>
 #include <stdexcept>
+#include <thread>
 
 void require(bool value, const char *message) {
   if (!value) throw std::runtime_error(message);
@@ -355,6 +357,37 @@ int main(int argc, char **argv) {
       require(reset.parameters.getRawParameterValue("scale")->load() == 43,
               "new scale reaches another synced processor");
       reset.releaseResources();
+    }
+    {
+      struct BlockingPlayHead : juce::AudioPlayHead {
+        mutable std::binary_semaphore entered{0}, resume{0};
+
+        juce::Optional<PositionInfo> getPosition() const override {
+          entered.release();
+          resume.acquire();
+          return {};
+        }
+      } playHead;
+      ChordInstrumentProcessor reset;
+      reset.prepareToPlay(48000, 512);
+      reset.setPlayHead(&playHead);
+      midi.clear();
+      midi.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(90)), 0);
+      std::jthread audioThread([&] { reset.processBlock(audio, midi); });
+      playHead.entered.acquire();
+      reset.resetToDefaults();
+      playHead.resume.release();
+      audioThread.join();
+      reset.setPlayHead(nullptr);
+      require(reset.hasSoundingOutput(), "in-flight block produces chord notes");
+      ChordInstrumentProcessor::DisplayFrame frame;
+      require(reset.readDisplaySnapshot(frame) && frame.chord.count == 0 && !frame.notes[36],
+              "a block started before Reset cannot restore the cleared display");
+      require(!reset.readDisplaySnapshot(frame), "Reset reports the cleared display once");
+      midi.clear();
+      reset.processBlock(audio, midi);
+      require(reset.readDisplaySnapshot(frame) && frame.chord.count == 3 && frame.notes[36],
+              "the display resumes updating with the next block");
     }
     midi.clear();
     midi.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(93)), 17);

@@ -61,10 +61,10 @@ public:
     muthechords::ChordSnapshot chord;
     std::array<bool, 128> notes{};
   };
-  bool readDisplaySnapshot(DisplayFrame &frame) { return chordDisplay.read(frame); }
+  bool readDisplaySnapshot(DisplayFrame &frame);
   bool readChordSnapshot(muthechords::ChordSnapshot &snapshot) {
     DisplayFrame frame;
-    if (!chordDisplay.read(frame)) return false;
+    if (!readDisplaySnapshot(frame)) return false;
     snapshot = frame.chord;
     return true;
   }
@@ -170,7 +170,13 @@ private:
   std::atomic<bool> resetPerformanceInput{false};
   std::atomic<int> editorWidth{760};
   std::atomic<bool> editorSizeRestored{false};
-  muthechords::DisplayMailbox<DisplayFrame> chordDisplay;
+  struct DisplayUpdate {
+    DisplayFrame frame;
+    unsigned int resetGeneration;
+  };
+  std::atomic<unsigned int> displayResetGeneration{0};
+  unsigned int lastReadDisplayResetGeneration = 0;
+  muthechords::DisplayMailbox<DisplayUpdate> chordDisplay;
 };
 
 using ChordInstrumentProcessor = MuTheChordsProcessor;
