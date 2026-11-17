@@ -106,6 +106,11 @@ make plugin-windows
 Built plugin bundles are placed in `dist/linux/` and `dist/windows/` (`MuTheChords.vst3` and `MuTheChords.clap`).
 Private external pattern libraries (`*.patterns.json`) are excluded from the repository via `.gitignore`; when present locally in `dist/<platform>/MuTheChords.patterns.json` (or specified via `MUTHECHORDS_PATTERN_LIBRARY`), they are loaded automatically.
 
+GitHub Releases provide `MuTheChords-plugins-*-x86_64.zip` archives with both plugin formats for Linux and Windows.
+Release plugins require an external pattern library for Performance mode.
+The `MuTheChords-linux-*.tar.gz` and `MuTheChords-windows-x86_64.zip` archives contain the CLI and C++ libraries.
+Linux CLI archives are built on Ubuntu 24.04 for x86_64 and ARM64. Extract the archive and launch `bin/MuTheChords` directly.
+
 ### 3. Cross-Compilation (Linux & Windows)
 
 ```bash

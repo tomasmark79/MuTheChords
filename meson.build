@@ -144,6 +144,8 @@ if not is_wasm
     include_directories: common_inc,
     dependencies: lib_deps,
     cpp_args: lib_cpp_args,
+    # Keep the MinGW runtime inside the Windows DLL as for the CLI.
+    link_args: is_windows ? ['-static'] : [],
     install: true,
   )
 endif

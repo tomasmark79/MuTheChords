@@ -9,43 +9,59 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-native:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v21
-        with:
-          flakehub: false
-
-      - name: Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@v13
-
-      - name: Build native (linux-x86_64)
-        run: nix develop ./nix --command make build
-
-      - name: Package native artifacts
-        run: |
-          mkdir -p release-artifacts
-          tar -czf release-artifacts/MuTheChords-linux-x86_64.tar.gz -C build/builddir-release .
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: MuTheChords-linux-x86_64
-          path: release-artifacts/MuTheChords-linux-x86_64.tar.gz
-
-  build-cross:
-    runs-on: ubuntu-latest
+  build-linux-cli:
     strategy:
-      fail-fast: false
       matrix:
-        arch: [aarch64, windows]
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install CLI build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ meson ninja-build pkg-config patchelf \
+            libfmt-dev nlohmann-json3-dev libcxxopts-dev
+
+      - name: Build and package CLI and libraries
+        shell: bash
+        run: |
+          meson setup build/release-cli --prefix=/usr --libdir=lib -Dbuild_tests=disabled
+          meson compile -C build/release-cli
+          meson install -C build/release-cli --destdir "$PWD/release-stage"
+          stage=release-stage/usr
+          patchelf --set-rpath "\$ORIGIN/../lib" "$stage/bin/MuTheChords"
+          patchelf --set-rpath "\$ORIGIN" "$stage/lib/libMuTheChordsLib.so"
+          fmt_soname=$(patchelf --print-needed "$stage/lib/libMuTheChordsLib.so" | awk '/^libfmt\.so\./')
+          if [[ -n "$fmt_soname" ]]; then
+            cp -L "$(pkg-config --variable=libdir fmt)/$fmt_soname" "$stage/lib/"
+            cp /usr/share/doc/libfmt-dev/copyright "$stage/LICENSE-fmt"
+          fi
+          cp LICENSE "$stage/"
+          mkdir -p release-artifacts
+          archive="release-artifacts/MuTheChords-linux-${{ matrix.arch }}.tar.gz"
+          tar -czf "$archive" -C "$stage" .
+          unpacked=$(mktemp -d)
+          tar -xzf "$archive" -C "$unpacked"
+          "$unpacked/bin/MuTheChords" --scales -n 62
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MuTheChords-linux-${{ matrix.arch }}
+          path: release-artifacts/*.tar.gz
+          if-no-files-found: error
+
+  build-windows-cli:
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,30 +71,120 @@ jobs:
         with:
           flakehub: false
 
-      - name: Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@v13
+      - name: Build Windows CLI and libraries
+        run: nix develop ./nix#windows --command make cross-windows
 
-      - name: Cross build (${{ matrix.arch }})
-        run: nix develop ./nix#${{ matrix.arch }} --command make cross-${{ matrix.arch }}
-
-      - name: Package cross artifacts (${{ matrix.arch }})
+      - name: Package Windows CLI and libraries
         run: |
+          nix develop ./nix#windows --command meson install -C build/builddir-windows-release \
+            --no-rebuild --destdir "$PWD/release-stage"
+          cp LICENSE release-stage/usr/local/
           mkdir -p release-artifacts
-          if [ "${{ matrix.arch }}" = "windows" ]; then
-            (cd build/builddir-windows-release && zip -r ../../release-artifacts/MuTheChords-windows-x86_64.zip .)
-          else
-            tar -czf release-artifacts/MuTheChords-linux-aarch64.tar.gz -C build/builddir-aarch64-release .
-          fi
+          (cd release-stage/usr/local && zip -qr ../../../release-artifacts/MuTheChords-windows-x86_64.zip .)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MuTheChords-${{ matrix.arch }}
-          path: release-artifacts/*
+          name: MuTheChords-windows-x86_64
+          path: release-artifacts/MuTheChords-windows-x86_64.zip
+          if-no-files-found: error
+
+  build-plugins:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux
+          - runner: windows-2022
+            platform: windows
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout JUCE 8.0.12
+        uses: actions/checkout@v4
+        with:
+          repository: juce-framework/JUCE
+          ref: 29396c22c93392d6738e021b83196283d6e4d850
+          path: third_party/JUCE
+          persist-credentials: false
+
+      - name: Checkout CLAP JUCE extensions
+        uses: actions/checkout@v4
+        with:
+          repository: free-audio/clap-juce-extensions
+          ref: 6bde108329ff9fc24404b79b8b397261a75cf6a8
+          path: third_party/clap-juce-extensions
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install Linux plugin build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ cmake ninja-build pkg-config libfmt-dev nlohmann-json3-dev \
+            libasound2-dev libfreetype6-dev libfontconfig1-dev libgl1-mesa-dev libx11-dev \
+            libxext-dev libxinerama-dev libxrandr-dev libxcursor-dev libxrender-dev
+
+      - name: Checkout fmt 12.1.0
+        if: runner.os == 'Windows'
+        uses: actions/checkout@v4
+        with:
+          repository: fmtlib/fmt
+          ref: 407c905e45ad75fc29bf0f9bb7c5c2fd3475976f
+          path: third_party/fmt
+          persist-credentials: false
+
+      - name: Checkout nlohmann JSON 3.12.0
+        if: runner.os == 'Windows'
+        uses: actions/checkout@v4
+        with:
+          repository: nlohmann/json
+          ref: 55f93686c01528224f448c19128836e7df245f72
+          path: third_party/json
+          persist-credentials: false
+
+      - name: Configure Linux plugins
+        if: runner.os == 'Linux'
+        run: |
+          cmake -S . -B build/release-plugins -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF -DCHORD_EMBED_PRIVATE_PATTERNS=OFF
+
+      - name: Configure Windows plugins
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:NIX_HEADER_INCLUDE_DIRS = "$env:GITHUB_WORKSPACE/third_party/fmt/include;$env:GITHUB_WORKSPACE/third_party/json/include"
+          cmake -S . -B build/release-plugins -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DBUILD_TESTING=OFF -DCHORD_EMBED_PRIVATE_PATTERNS=OFF
+
+      - name: Build VST3 and CLAP
+        run: cmake --build build/release-plugins --config Release --target MuTheChords_VST3 MuTheChords_CLAP --parallel 2
+
+      - name: Package VST3 and CLAP
+        shell: bash
+        run: |
+          artifacts=build/release-plugins/MuTheChords_artefacts/Release
+          mkdir -p release-stage release-artifacts
+          cp -R "$artifacts/VST3/MuTheChords.vst3" release-stage/
+          cp "$artifacts/CLAP/MuTheChords.clap" LICENSE release-stage/
+          cd release-stage
+          cmake -E tar cf "../release-artifacts/MuTheChords-plugins-${{ matrix.platform }}-x86_64.zip" \
+            --format=zip MuTheChords.vst3 MuTheChords.clap LICENSE
+
+      - name: Upload plugins
+        uses: actions/upload-artifact@v4
+        with:
+          name: MuTheChords-plugins-${{ matrix.platform }}-x86_64
+          path: release-artifacts/*.zip
+          if-no-files-found: error
 
   release:
-    needs: [build-native, build-cross]
+    needs: [build-linux-cli, build-windows-cli, build-plugins]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -88,8 +194,8 @@ jobs:
       - name: Determine version
         id: version
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            TAG="${{ github.ref_name }}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG="$GITHUB_REF_NAME"
           else
             LATEST=$(git tag -l "v[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | head -n1)
             if [ -z "$LATEST" ]; then
@@ -111,6 +217,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           name: ${{ steps.version.outputs.tag }}
           generate_release_notes: true
           make_latest: true

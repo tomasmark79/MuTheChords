@@ -29,11 +29,7 @@ int main(int argc, char **argv) {
                           cxxopts::value<int>()->default_value("60"));
     auto result = options.parse(argc, argv);
 
-#if !defined(__EMSCRIPTEN__)
-    if (result.contains("help")) {
-#else
     if (result.count("help") > 0) {
-#endif
       std::cout << options.help() << '\n';
       return EXIT_SUCCESS;
     }
