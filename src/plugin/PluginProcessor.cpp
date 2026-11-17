@@ -446,8 +446,40 @@ void MuTheChordsProcessor::emit(muthechords::Event e, int offset) {
            : juce::MidiMessage::noteOff(e.channel, e.note),
       offset);
 }
+void MuTheChordsProcessor::handleChordOutput(muthechords::Event e) {
+  if (!e.on) {
+    for (size_t i = 0; i < pendingStrumCount; ++i) {
+      const auto &pending = pendingStrum[i].event;
+      if (pending.channel == e.channel && pending.note == e.note) {
+        pendingStrum[i] = pendingStrum[--pendingStrumCount];
+        return;
+      }
+    }
+  } else if (const int strum = engine.settings().strum; strum > 0 && e.voiceCount > 1) {
+    const int order = strum >= 3 ? e.voiceCount - 1 - e.voiceIndex : e.voiceIndex;
+    if (order > 0) {
+      const double seconds = strum == 2 || strum == 4 ? 0.012 : 0.005;
+      const auto stepSamples = std::max<int64_t>(1, std::llround(seconds * sampleRate));
+      pendingStrum[pendingStrumCount++] = {e, eventOffset + order * stepSamples};
+      return;
+    }
+  }
+  emit(e, eventOffset);
+}
+void MuTheChordsProcessor::flushStrum(int endOffset) {
+  size_t remaining = 0;
+  for (size_t i = 0; i < pendingStrumCount; ++i) {
+    const auto voice = pendingStrum[i];
+    if (voice.offset < endOffset)
+      emit(voice.event, static_cast<int>(voice.offset));
+    else
+      pendingStrum[remaining++] = voice;
+  }
+  pendingStrumCount = remaining;
+}
 void MuTheChordsProcessor::stopAll(bool clearControllers) {
   engine.reset(clearControllers);
+  pendingStrumCount = 0;
   performance.stop();
   for (int c = 0; c < 16; ++c)
     for (int n = 0; n < 128; ++n) {
@@ -554,7 +586,6 @@ void MuTheChordsProcessor::processBlock(juce::AudioBuffer<float> &audio, juce::M
   audio.clear();
   output.clear();
   eventOffset = 0;
-  blockSamples = std::max(1, audio.getNumSamples());
   releasedForRestart = -1;
   if (userBypassed) {
     for (int c = 0; c < 16; ++c)
@@ -565,20 +596,7 @@ void MuTheChordsProcessor::processBlock(juce::AudioBuffer<float> &audio, juce::M
     userBypassed = false;
   }
   engine.setOutput(this, [](void *raw, muthechords::Event e) {
-    auto &p = *static_cast<MuTheChordsProcessor *>(raw);
-    int offset = p.eventOffset;
-    if (e.on && e.voiceCount > 1) {
-      const int strum = p.engine.settings().strum;
-      if (strum > 0) {
-        const bool down = strum >= 3;
-        const bool slow = strum == 2 || strum == 4;
-        const int order = down ? (e.voiceCount - 1 - e.voiceIndex) : e.voiceIndex;
-        const int stepSamples =
-            std::max(1, static_cast<int>(std::round((slow ? 0.012 : 0.005) * p.sampleRate)));
-        offset = std::min(p.blockSamples - 1, p.eventOffset + order * stepSamples);
-      }
-    }
-    p.emit(e, offset);
+    static_cast<MuTheChordsProcessor *>(raw)->handleChordOutput(e);
   });
   performance.setOutput(this, [](void *raw, muthechords::Event e, int sample) {
     static_cast<MuTheChordsProcessor *>(raw)->emit(e, sample);
@@ -684,6 +702,8 @@ void MuTheChordsProcessor::processBlock(juce::AudioBuffer<float> &audio, juce::M
   int cursor = 0;
   for (const auto metadata : midi) {
     eventOffset = std::clamp(metadata.samplePosition, 0, std::max(0, audio.getNumSamples() - 1));
+    // Input at the same sample can cancel an attack that has not sounded yet.
+    flushStrum(eventOffset);
     if (settings.mode == 1 && beatsPerSample > 0 && (!playing || positionValid))
       performance.advance(startBeat, beatsPerSample, cursor, eventOffset);
     cursor = eventOffset;
@@ -739,6 +759,9 @@ void MuTheChordsProcessor::processBlock(juce::AudioBuffer<float> &audio, juce::M
     } else
       output.addEvent(message, eventOffset);
   }
+  flushStrum(audio.getNumSamples());
+  for (size_t i = 0; i < pendingStrumCount; ++i)
+    pendingStrum[i].offset -= audio.getNumSamples();
   if (settings.mode == 1 && beatsPerSample > 0 && (!playing || positionValid))
     performance.advance(startBeat, beatsPerSample, cursor, audio.getNumSamples());
   if (settings.mode == 1 && readPerformanceSettings().playback == 1 && !performance.isActive())

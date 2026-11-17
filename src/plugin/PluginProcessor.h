@@ -113,12 +113,21 @@ private:
   muthechords::ChordSnapshot buildHarmony(int note, int channel, const muthechords::Settings &,
                                           bool preview = false);
   void emit(muthechords::Event, int offset);
+  void handleChordOutput(muthechords::Event);
+  void flushStrum(int endOffset);
   void stopAll(bool clearControllers = false);
   void handleNoteOn(int channel, int note, int velocity, double beat,
                     const muthechords::Settings &);
   void handleNoteOff(int channel, int note, const muthechords::Settings &);
   bool pedalDown(int channel, const muthechords::Settings &) const;
   std::array<std::array<unsigned int, 128>, 16> outputOwners{}, passed{};
+  struct PendingStrumVoice {
+    muthechords::Event event;
+    int64_t offset;
+  };
+  // The chord engine emits at most one outstanding note-on per channel and pitch.
+  std::array<PendingStrumVoice, 16 * 128> pendingStrum;
+  size_t pendingStrumCount = 0;
   std::array<int, 16> rawPedals{};
   std::array<bool, 16> pedalSeen{};
   std::atomic<int> performancePreviewRequest{-1};
@@ -129,7 +138,6 @@ private:
   int triggerNote = -1, triggerChannel = 1, lastPerformanceInput = -1;
   bool performanceKeyHeld = false;
   int eventOffset = 0;
-  int blockSamples = 512;
   int releasedForRestart = -1;
   juce::MidiBuffer output;
   std::atomic<bool> stopRequested{false};

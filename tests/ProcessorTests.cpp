@@ -545,6 +545,66 @@ int main(int argc, char **argv) {
               "Strum Down spreads chord attacks from high to low");
       strum.releaseResources();
     }
+    {
+      ChordInstrumentProcessor strum;
+      strum.prepareToPlay(48000, 512);
+      set(strum, "strum", 1);
+      midi.clear();
+      midi.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(90)), 10);
+      midi.addEvent(juce::MidiMessage::noteOff(1, 36), 100);
+      strum.processBlock(audio, midi);
+      require(midi.getNumEvents() == 2, "short tap cancels strum voices before their onset");
+      auto event = midi.begin();
+      require((*event).getMessage().isNoteOn() && (*event).getMessage().getNoteNumber() == 36 &&
+                  (*event).samplePosition == 10,
+              "short tap starts the first strum voice");
+      ++event;
+      require((*event).getMessage().isNoteOff() && (*event).getMessage().getNoteNumber() == 36 &&
+                  (*event).samplePosition == 100,
+              "short tap releases only the voice that sounded");
+    }
+    {
+      ChordInstrumentProcessor strum;
+      strum.prepareToPlay(48000, 128);
+      set(strum, "strum", 1);
+      juce::AudioBuffer<float> shortBlock(2, 128);
+      std::vector<std::pair<int, int>> attacks;
+      int blockStart = 0;
+      for (int blockSize : {128, 64, 128, 128, 128}) {
+        shortBlock.setSize(2, blockSize);
+        midi.clear();
+        if (blockStart == 0)
+          midi.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(90)), 10);
+        strum.processBlock(shortBlock, midi);
+        for (auto event : midi) {
+          const auto message = event.getMessage();
+          require(message.isNoteOn(), "held strum emits only note-ons");
+          attacks.emplace_back(message.getNoteNumber(), blockStart + event.samplePosition);
+        }
+        blockStart += blockSize;
+      }
+      require(attacks == std::vector<std::pair<int, int>>{{36, 10}, {40, 250}, {43, 490}},
+              "strum preserves exact onset spacing across changing block lengths");
+      strum.requestStop();
+      midi.clear();
+      strum.processBlock(shortBlock, midi);
+      require(midi.getNumEvents() == 3, "stop releases the three sounding strum voices");
+      midi.clear();
+      midi.addEvent(juce::MidiMessage::noteOn(1, 36, static_cast<juce::uint8>(90)), 120);
+      strum.processBlock(shortBlock, midi);
+      require(midi.getNumEvents() == 1, "only the first strum voice starts near the block end");
+      set(strum, "bypass", 1);
+      midi.clear();
+      strum.processBlock(shortBlock, midi);
+      require(midi.getNumEvents() == 1 && (*midi.begin()).getMessage().isNoteOff(),
+              "bypass releases the strum voice that sounded");
+      set(strum, "bypass", 0);
+      for (int block = 0; block < 4; ++block) {
+        midi.clear();
+        strum.processBlock(shortBlock, midi);
+        require(midi.isEmpty(), "bypass discards pending strum voices");
+      }
+    }
     if (argc > 1) {
       set(p, "mode", 0);
       set(p, "strum", 0);
