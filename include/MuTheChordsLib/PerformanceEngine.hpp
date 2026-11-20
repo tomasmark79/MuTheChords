@@ -96,6 +96,21 @@ namespace muthechords {
 
     void release() { stop(); }
 
+    void rebase(double beatDelta) {
+      if (!std::isfinite(beatDelta) || beatDelta == 0.0) {
+        return;
+      }
+      origin += beatDelta;
+      if (pending) {
+        pendingBeat += beatDelta;
+      }
+      for (auto &n : notes) {
+        if (n.used) {
+          n.offBeat += beatDelta;
+        }
+      }
+    }
+
     void resetChannel(int channel) {
       if (channel < 1 || channel > 16) {
         return;

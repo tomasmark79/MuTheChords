@@ -966,10 +966,11 @@ void MuTheChordsEditor::syncPatternSelectors() {
 }
 void MuTheChordsEditor::timerCallback() {
   if (processor.takeEditorSizeRestore()) {
+    const double logicalHeight = compactMode ? 76.0 : 720.0;
     const int width = processor.savedEditorWidth();
-    setSize(width, juce::roundToInt(width * 720.0 / 760.0));
+    setSize(width, juce::roundToInt(width * logicalHeight / 760.0));
   }
-  syncInfo.setVisible(value("harmonySync") > 0.5f);
+  syncInfo.setVisible(!compactMode && value("harmonySync") > 0.5f);
   performanceMode = value("mode") > 0.5f;
   strum.setEnabled(!performanceMode);
   strumLabel.setEnabled(!performanceMode);
@@ -981,8 +982,8 @@ void MuTheChordsEditor::timerCallback() {
                        ? "Latch applies in Held playback mode."
                        : "Keep playing after key release; press the same key to stop.");
   const bool useAlt = value("pedal") > 1.5f;
-  alt.setVisible(useAlt);
-  altLabel.setVisible(useAlt);
+  alt.setVisible(!compactMode && useAlt);
+  altLabel.setVisible(!compactMode && useAlt);
   low.setEnabled(value("full") < 0.5f);
   high.setEnabled(value("full") < 0.5f);
   for (juce::Component *component : std::initializer_list<juce::Component *>{
@@ -1083,6 +1084,13 @@ void MuTheChordsEditor::setCompactMode(bool compact) {
   for (auto *child : content.getChildren())
     child->setVisible(!compactMode || child == &outputTitle || child == &outputNotes ||
                       child == &chordTrail || child == &compactButton);
+  spellingLabel.setVisible(false);
+  if (!compactMode) {
+    syncInfo.setVisible(value("harmonySync") > 0.5f);
+    const bool useAlt = value("pedal") > 1.5f;
+    alt.setVisible(useAlt);
+    altLabel.setVisible(useAlt);
+  }
   const double logicalHeight = compactMode ? 76.0 : 720.0;
   const int currentWidth = std::max(570, getWidth());
   getConstrainer()->setFixedAspectRatio(760.0 / logicalHeight);

@@ -872,6 +872,61 @@ int main(int argc, char **argv) {
       set(restoredSync, "harmonySync", 0);
       tick();
     }
+    {
+      // Regression: loop wrap discontinuity must not kill freshly triggered chords in Chords mode.
+      set(r.p, "mode", 0);
+      set(r.p, "latch", 0);
+      set(r.p, "pedal", 0);
+      set(r.p, "root", 4);
+      set(r.p, "scale", 1);
+      set(r.p, "chord", 1);
+      set(r.p, "full", 1);
+      r.host.playing = true;
+      r.host.validPosition = true;
+      r.host.beat = 47.99;
+      r.empty();
+      r.midi.clear();
+      r.midi.addEvent(juce::MidiMessage::noteOn(1, 40, (juce::uint8)100), 120);
+      r.p.processBlock(r.audio, r.midi);
+      require(r.p.outputNote(40) && r.p.outputNote(43) && r.p.outputNote(47),
+              "Chords mode sounds loop-start E minor triad");
+      r.host.beat = 0.01;
+      r.empty();
+      require(r.p.outputNote(40) && r.p.outputNote(43) && r.p.outputNote(47),
+              "Chords mode keeps loop-start chord sounding across DAW loop wrap");
+      r.off(40);
+      require(!r.p.outputNote(40) && !r.p.outputNote(43) && !r.p.outputNote(47),
+              "Chords mode releases chord on NoteOff");
+    }
+    {
+      // Regression: Performance mode with a held loop-start note must rebase
+      // across a DAW loop wrap instead of stopping playback.
+      set(r.p, "mode", 1);
+      set(r.p, "latch", 0);
+      set(r.p, "pedal", 0);
+      set(r.p, "perfPlayback", 0);
+      set(r.p, "perfDawSync", 1);
+      set(r.p, "root", 4);
+      set(r.p, "scale", 1);
+      set(r.p, "chord", 1);
+      set(r.p, "full", 1);
+      r.host.playing = true;
+      r.host.validPosition = true;
+      r.host.beat = 47.99 - 512.0 * r.host.bpm / (60.0 * 48000.0);
+      r.empty();
+      r.on(40, 240);
+      require(r.p.performanceRunning(), "Performance mode starts on loop-start note");
+      r.host.beat -= 48.0;
+      bool playedAfterWrap = false;
+      for (int i = 0; i < 100; ++i) {
+        r.empty();
+        playedAfterWrap |= r.ons() > 0;
+      }
+      require(r.p.performanceRunning() && playedAfterWrap,
+              "Performance mode keeps playing held loop-start note across DAW loop wrap");
+      r.off(40);
+      require(!r.p.performanceRunning(), "Performance mode stops on NoteOff after loop wrap");
+    }
     r.p.releaseResources();
     std::cout << "Performance processor transport, timing, harmony, preview, "
                  "latch, seek and state checks passed.\n";

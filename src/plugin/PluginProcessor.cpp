@@ -639,16 +639,19 @@ void MuTheChordsProcessor::processBlock(juce::AudioBuffer<float> &audio, juce::M
   const bool changedMode = oldSettings.mode != settings.mode;
   const bool takeover = playing && !wasPlaying;
   const bool discontinuity =
-      playing && wasPlaying && positionValid && hadHostPosition &&
+      settings.mode == 1 && playing && wasPlaying && positionValid && hadHostPosition &&
       std::abs(hostBeat - expectedHostBeat) > std::max(1e-5, beatsPerSample * 2);
+  const bool rebaseHeldPerformance = discontinuity && performanceKeyHeld;
+  const bool stopOnDiscontinuity = discontinuity && !rebaseHeldPerformance;
   const bool transportStop = wasPlaying && !playing;
   const bool positionLost = playing && !positionValid && settings.mode == 1;
   const double startBeat = playing && positionValid ? hostBeat : stoppedBeat;
+  if (rebaseHeldPerformance) performance.rebase(hostBeat - expectedHostBeat);
   performance.advance(startBeat, beatsPerSample, 0, 0);
   const bool restored = stateRestored.exchange(false);
   if (resetPerformanceInput.exchange(false)) lastPerformanceInput = -1;
   const bool requestedStop = stopRequested.exchange(false);
-  if (restored || changedMode || transportStop || takeover || discontinuity || positionLost ||
+  if (restored || changedMode || transportStop || takeover || stopOnDiscontinuity || positionLost ||
       requestedStop) {
     stopAll(restored);
     previewHeld = -1;
@@ -656,7 +659,8 @@ void MuTheChordsProcessor::processBlock(juce::AudioBuffer<float> &audio, juce::M
     lastOutside.store(false);
     // Explicit stop/restoration/transport discontinuities also cancel queued UI
     // starts.
-    if (restored || transportStop || takeover || discontinuity || positionLost || requestedStop) {
+    if (restored || transportStop || takeover || stopOnDiscontinuity || positionLost ||
+        requestedStop) {
       previewRequest.store(-1);
       performancePreviewRequest.store(-1);
     }
